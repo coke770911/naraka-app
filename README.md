@@ -189,6 +189,7 @@ Token 與 Chat ID 會以密碼形式顯示並保存在本機 `config.json`。
 | --- | ---: | --- |
 | `main.py` | 27 | 進入點，包住例外處理 |
 | `build.spec` | 62 | PyInstaller 打包設定（onedir） |
+| `assets/make_icon.py` | 124 | 程式化產生 `icon.ico` / `icon.png` |
 | `naraka/paths.py` | 30 | 資料目錄解析（`%LOCALAPPDATA%\NarakaStarMonitor`） |
 | `naraka/models.py` | 336 | `Listing` / `Criteria` / 各設定資料類別、星格解析、URL 組裝 |
 | `naraka/config_store.py` | 83 | `config.json` 讀寫（原子寫入 + RLock 執行緒安全） |
@@ -271,8 +272,20 @@ pip install pyinstaller
 pyinstaller build.spec --noconfirm
 ```
 
-輸出 `dist\NarakaStarMonitor\NarakaStarMonitor.exe`（onedir 啟動較快）。
-若放入 `assets\icon.ico` 會自動套用為程式圖示。
+輸出 `dist\NarakaStarMonitor\NarakaStarMonitor.exe`（onedir 啟動較快），
+並自動套用 `assets\icon.ico`（16~256 多尺寸）為程式圖示。
+
+### 重新產生圖示
+
+圖示由程式繪製，不需另外準備素材。若想調色或改形狀：
+
+```powershell
+python assets/make_icon.py
+```
+
+`assets/make_icon.py` 會輸出 1024px 的 `icon.png`（可自行替換後重跑）
+與多尺寸的 `icon.ico`。Pillow 只在重跑這支時才需要（列於
+`requirements-dev.txt`），一般執行與打包都不需要它。
 
 ---
 
