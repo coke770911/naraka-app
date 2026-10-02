@@ -18,7 +18,7 @@ import customtkinter as ctk
 from .. import __version__
 from ..config_store import ConfigStore
 from ..crawler import CrawlerWorker
-from ..models import AppConfig, ItemEntry, extract_hash_name, normalize_name
+from ..models import ANY, AppConfig, Criteria, ItemEntry, extract_hash_name, normalize_name
 from ..notifiers import Notifier
 from ..paths import config_path, file_log_path
 from .bridge import UiBridge
@@ -53,6 +53,7 @@ class NarakaApp(ctk.CTk):
         self._worker: Optional[CrawlerWorker] = None
         self._autosave_job: Optional[str] = None
         self._rows: Dict[str, ItemRow] = {}
+        self._selected_id: Optional[str] = None
         self._next_at: Optional[float] = None
         self._slot_min_entries: List[ctk.CTkEntry] = []
         self._slot_max_entries: List[ctk.CTkEntry] = []
@@ -151,6 +152,9 @@ class NarakaApp(ctk.CTk):
         self._build_settings_tab(self.tabview.tab("條件與設定"))
         self._build_log_tab(self.tabview.tab("即時日誌"))
 
+    def _show_tab(self, name: str) -> None:
+        self.tabview.set(name)
+
     # ── 分頁 1：監控清單 ────────────────────────────────────────
     def _build_items_tab(self, parent) -> None:
         parent.grid_columnconfigure(0, weight=1)
@@ -202,69 +206,92 @@ class NarakaApp(ctk.CTk):
         wrapper.grid_columnconfigure(0, weight=1)
         row = 0
 
-        # 價格條件
-        row = self._section(wrapper, row, "價格條件")
+        # ══ 每個物品的條件 ══════════════════════════════════════
+        row = self._section(wrapper, row, "物品條件")
+
+        self.cond_bar = ctk.CTkFrame(wrapper, fg_color="#1c2128", corner_radius=8)
+        self.cond_bar.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+        self.cond_bar.grid_columnconfigure(0, weight=1)
+        self.lbl_cond_target = ctk.CTkLabel(
+            self.cond_bar, text="尚未選取物品", font=(FONT, 13, "bold"),
+            text_color="#6e7681", anchor="w", justify="left",
+        )
+        self.lbl_cond_target.grid(row=0, column=0, sticky="w", padx=12, pady=10)
+        ctk.CTkButton(
+            self.cond_bar, text="設為新增物品預設", font=(FONT, 12), width=150, height=30,
+            fg_color="#3b4a5a", hover_color="#4a5c6e", command=self._save_criteria_as_default,
+        ).grid(row=0, column=1, padx=(0, 12), pady=10)
+        row += 1
+
+        self.cond_body = ctk.CTkFrame(wrapper, fg_color="transparent")
+        self.cond_body.grid(row=row, column=0, columnspan=2, sticky="ew")
+
         self.entry_price = self._labelled(
-            wrapper, row, "價格上限（NT$）",
-            ctk.CTkEntry(wrapper, width=160, font=(MONO, 13), placeholder_text="10000"),
+            self.cond_body, 0, "價格上限（NT$）",
+            ctk.CTkEntry(self.cond_body, width=160, font=(MONO, 13), placeholder_text="0 = 不限"),
         )
         wrapper.grid_columnconfigure(1, weight=1)
-        self.entry_price.grid(row=row, column=1, sticky="w", pady=5)
+        self.entry_price.grid(row=0, column=1, sticky="w", pady=5)
         self.entry_price.bind("<KeyRelease>", lambda _e: self._schedule_autosave())
-        row += 2
+        self.lbl_price_hint = ctk.CTkLabel(
+            self.cond_body, text="填 0 代表不限價", font=(FONT, 11),
+            text_color="#8b949e", anchor="w",
+        )
+        self.lbl_price_hint.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         # 星格條件
-        row = self._section(wrapper, row, "星格條件")
-        self.var_slot_count = ctk.StringVar(value="3")
+        self.var_slot_count = ctk.StringVar(value="0")
         self.opt_slot_count = ctk.CTkOptionMenu(
-            wrapper, values=["3", "4"], variable=self.var_slot_count, width=120,
+            self.cond_body, values=["0", "3", "4"], variable=self.var_slot_count, width=120,
             font=(FONT, 13), command=self._on_slot_count_change,
         )
-        self.opt_slot_count.grid(row=row, column=1, sticky="w", pady=5)
+        self.opt_slot_count.grid(row=2, column=1, sticky="w", pady=5)
         ctk.CTkLabel(
-            wrapper, text="格數", font=(FONT, 13), width=140, anchor="w"
-        ).grid(row=row, column=0, sticky="w", pady=5)
-        row += 1
+            self.cond_body, text="格數來源（0=自動）", font=(FONT, 13), width=140, anchor="w"
+        ).grid(row=2, column=0, sticky="w", pady=5)
+        self.lbl_detected = ctk.CTkLabel(
+            self.cond_body, text="", font=(FONT, 11), text_color="#8b949e", anchor="w",
+        )
+        self.lbl_detected.grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         self.slot_hint = ctk.CTkLabel(
-            wrapper, text="", font=(FONT, 11), text_color="#8b949e", anchor="w", justify="left"
+            self.cond_body, text="", font=(FONT, 11), text_color="#8b949e",
+            anchor="w", justify="left",
         )
-        self.slot_hint.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 6))
-        row += 1
+        self.slot_hint.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 6))
 
-        self.slot_frame = ctk.CTkFrame(wrapper, fg_color="transparent")
-        self.slot_frame.grid(row=row, column=0, columnspan=2, sticky="ew")
+        self.slot_frame = ctk.CTkFrame(self.cond_body, fg_color="transparent")
+        self.slot_frame.grid(row=5, column=0, columnspan=2, sticky="ew")
         self.slot_frame.grid_columnconfigure(1, weight=1)
-        row += 1
 
         self.var_logic = ctk.StringVar(value="OR")
         self.opt_logic = ctk.CTkOptionMenu(
-            wrapper, values=["AND", "OR"], variable=self.var_logic, width=120, font=(FONT, 13),
-            command=lambda _v: self._schedule_autosave(),
-        )
-        self.opt_logic.grid(row=row, column=1, sticky="w", pady=5)
-        ctk.CTkLabel(
-            wrapper, text="匹配邏輯", font=(FONT, 13), width=140, anchor="w"
-        ).grid(row=row, column=0, sticky="w", pady=5)
-        row += 1
-
-        self.var_min_match = ctk.StringVar(value="3")
-        self.opt_min_match = ctk.CTkOptionMenu(
-            wrapper, values=["1", "2", "3"], variable=self.var_min_match, width=120,
+            self.cond_body, values=["AND", "OR"], variable=self.var_logic, width=120,
             font=(FONT, 13), command=lambda _v: self._schedule_autosave(),
         )
-        self.opt_min_match.grid(row=row, column=1, sticky="w", pady=5)
+        self.opt_logic.grid(row=6, column=1, sticky="w", pady=5)
         ctk.CTkLabel(
-            wrapper, text="最少符合格數", font=(FONT, 13), width=140, anchor="w"
-        ).grid(row=row, column=0, sticky="w", pady=5)
-        row += 1
+            self.cond_body, text="匹配邏輯", font=(FONT, 13), width=140, anchor="w"
+        ).grid(row=6, column=0, sticky="w", pady=5)
+
+        self.var_min_match = ctk.StringVar(value="1")
+        self.opt_min_match = ctk.CTkOptionMenu(
+            self.cond_body, values=["1", "2", "3", "4"], variable=self.var_min_match,
+            width=120, font=(FONT, 13), command=lambda _v: self._schedule_autosave(),
+        )
+        self.opt_min_match.grid(row=7, column=1, sticky="w", pady=5)
+        ctk.CTkLabel(
+            self.cond_body, text="最少符合格數", font=(FONT, 13), width=140, anchor="w"
+        ).grid(row=7, column=0, sticky="w", pady=5)
 
         ctk.CTkLabel(
-            wrapper,
+            self.cond_body,
             text="AND = 所有格都要符合；OR = 符合格數達到「最少符合格數」即可。\n"
-                 "每格可填「下限」與「上限」（上限填 0 或留空代表不限）；最後一格固定為精確值（0 或 1）。",
+                 "每格可填「下限」與「上限」（上限填 0 或留空代表不限）；\n"
+                 "最後一格為 0/1 二元位，填 0 或 1 是精確比對，填 -1 代表不關心。\n"
+                 "格數來源選「自動」時，會依掃描到的實際格數（3 格或 4 格）比對。",
             font=(FONT, 11), text_color="#8b949e", anchor="w", justify="left",
-        ).grid(row=row, column=0, columnspan=2, sticky="ew", pady=(4, 10))
+        ).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(4, 10))
         row += 2
 
         # 抓取頻率
@@ -427,13 +454,7 @@ class NarakaApp(ctk.CTk):
     # ══════════════════════════════════════════════════════════
     def _load_ui(self) -> None:
         cfg = self.store.snapshot()
-        criteria, crawler = cfg.criteria, cfg.crawler
-
-        self.entry_price.insert(0, f"{criteria.max_price_ntd:g}")
-        self.var_slot_count.set(str(criteria.slot_count))
-        self._rebuild_slot_rows()
-        self.var_logic.set(criteria.logic)
-        self._rebuild_min_match(criteria.effective_min_match)
+        crawler = cfg.crawler
 
         self.entry_interval_min.insert(0, f"{crawler.interval_min_sec:g}")
         self.entry_interval_max.insert(0, f"{crawler.interval_max_sec:g}")
@@ -451,6 +472,10 @@ class NarakaApp(ctk.CTk):
         self.entry_cookie_session.insert(0, cfg.steam.cookies.get("sessionid", ""))
 
         self._rebuild_items(cfg.items)
+        if cfg.items:
+            self._select_item(cfg.items[0].id)
+        else:
+            self._refresh_condition_panel()
 
     @staticmethod
     def _set_switch(switch: ctk.CTkSwitch, value: bool) -> None:
@@ -476,43 +501,56 @@ class NarakaApp(ctk.CTk):
         self.log_box.append("設定已儲存", "sent")
 
     def _apply_settings(self) -> None:
-        criteria = self.store.snapshot().criteria
-        crawler = self.store.snapshot().crawler
+        cfg_snapshot = self.store.snapshot()
+        crawler = cfg_snapshot.crawler
+        target = cfg_snapshot.item_by_id(self._selected_id) if self._selected_id else None
 
-        price = self._read_float(self.entry_price, criteria.max_price_ntd)
+        price = self._read_float(self.entry_price, target.criteria.max_price_ntd if target else 0.0)
         interval_min = self._read_float(self.entry_interval_min, crawler.interval_min_sec)
         interval_max = self._read_float(self.entry_interval_max, crawler.interval_max_sec)
         delay_min = self._read_float(self.entry_delay_min, crawler.delay_min_sec)
         delay_max = self._read_float(self.entry_delay_max, crawler.delay_max_sec)
         max_pages = self._read_int(self.entry_max_pages, crawler.max_pages)
 
+        fallback = target.criteria if target else Criteria.loose()
         mins: List[int] = []
         maxs: List[int] = []
         for index, entry in enumerate(self._slot_min_entries):
-            mins.append(self._read_int(entry, criteria.slot_min[index]
-                                      if index < len(criteria.slot_min) else 0))
+            mins.append(self._read_int(entry, fallback.slot_min[index]
+                                      if index < len(fallback.slot_min) else 0))
         for index, entry in enumerate(self._slot_max_entries):
-            maxs.append(self._read_int(entry, criteria.slot_max[index]
-                                      if index < len(criteria.slot_max) else 0))
+            maxs.append(self._read_int(entry, fallback.slot_max[index]
+                                      if index < len(fallback.slot_max) else 0))
         try:
             min_match = int(self.var_min_match.get())
             logic = self.var_logic.get()
         except ValueError:
-            min_match, logic = criteria.effective_min_match, criteria.logic
+            min_match, logic = fallback.effective_min_match, fallback.logic
+
+        try:
+            slot_count = int(self.var_slot_count.get())
+        except ValueError:
+            slot_count = fallback.slot_count
 
         token = self.entry_token.get().strip()
         chat_id = self.entry_chatid.get().strip()
         cookie_login = self.entry_cookie_login.get().strip()
         cookie_session = self.entry_cookie_session.get().strip()
+        selected_id = self._selected_id
 
         def apply(cfg: AppConfig) -> None:
-            cfg.criteria.max_price_ntd = price
-            if mins:
-                cfg.criteria.slot_min = mins
-            if maxs:
-                cfg.criteria.slot_max = maxs
-            cfg.criteria.logic = logic
-            cfg.criteria.min_match = min_match
+            if selected_id:
+                item = cfg.item_by_id(selected_id)
+                if item is not None:
+                    item.criteria.max_price_ntd = price
+                    item.criteria.slot_count = slot_count
+                    if mins:
+                        item.criteria.slot_min = mins
+                    if maxs:
+                        item.criteria.slot_max = maxs
+                    item.criteria.logic = logic
+                    item.criteria.min_match = min_match
+                    item.criteria.normalise(item.detected_slot_count)
             cfg.crawler.interval_min_sec = interval_min
             cfg.crawler.interval_max_sec = interval_max
             cfg.crawler.delay_min_sec = delay_min
@@ -532,6 +570,15 @@ class NarakaApp(ctk.CTk):
             self.store.mutate(apply)
         except OSError as exc:
             self.log_box.append(f"設定寫入失敗：{exc}", "error")
+            return
+        self._sync_row_conditions()
+
+    def _sync_row_conditions(self) -> None:
+        """把各物品目前的條件摘要更新回清單列（條件改動或掃描偵測後呼叫）。"""
+        for item in self.store.snapshot().items:
+            row = self._rows.get(item.id)
+            if row is not None:
+                row.set_conditions(item.conditions_summary())
 
     @staticmethod
     def _read_float(entry: ctk.CTkEntry, fallback: float) -> float:
@@ -554,14 +601,18 @@ class NarakaApp(ctk.CTk):
             return fallback
 
     # ── 星格條件列 ──────────────────────────────────────────────
-    def _rebuild_slot_rows(self) -> None:
+    def _rebuild_slot_rows(self, criteria: Optional[Criteria] = None,
+                           detected: int = 0) -> None:
         for child in self.slot_frame.winfo_children():
             child.destroy()
         self._slot_min_entries = []
         self._slot_max_entries = []
 
-        criteria = self.store.snapshot().criteria
-        total = criteria.slot_count
+        if criteria is None:
+            self.slot_hint.configure(text="")
+            return
+
+        total = criteria.resolve_slot_count(detected)
         hints = []
         for index in range(total):
             is_last = index == total - 1
@@ -569,7 +620,7 @@ class NarakaApp(ctk.CTk):
             row.grid_columnconfigure(2, weight=1)
             row.grid(row=index, column=0, sticky="ew")
 
-            hint = criteria.slot_range_hint(index)
+            hint = criteria.slot_range_hint(index, detected)
             hints.append(f"第{index + 1}格 {hint}")
             ctk.CTkLabel(
                 row, text=f"第{index + 1}格", font=(FONT, 13), width=64, anchor="w"
@@ -580,7 +631,7 @@ class NarakaApp(ctk.CTk):
 
             low = criteria.slot_min[index] if index < len(criteria.slot_min) else 0
             entry = ctk.CTkEntry(row, width=96, font=(MONO, 13))
-            entry.insert(0, str(low))
+            entry.insert(0, "" if (is_last and low == ANY) else str(low))
             entry.bind("<KeyRelease>", lambda _e: self._schedule_autosave())
             entry.bind("<FocusOut>", lambda _e: self._schedule_autosave())
             entry.grid(row=0, column=2, sticky="w", padx=(0, 8))
@@ -588,7 +639,8 @@ class NarakaApp(ctk.CTk):
 
             if is_last:
                 ctk.CTkLabel(
-                    row, text="（精確值）", font=(FONT, 10), text_color="#6e7681", anchor="w"
+                    row, text="（精確值，-1 = 不限）", font=(FONT, 10),
+                    text_color="#6e7681", anchor="w",
                 ).grid(row=0, column=3, sticky="w")
             else:
                 ctk.CTkLabel(
@@ -602,12 +654,13 @@ class NarakaApp(ctk.CTk):
                 max_entry.grid(row=0, column=4, sticky="w")
                 self._slot_max_entries.append(max_entry)
 
-        self.slot_hint.configure(text="值域：" + "　".join(hints) + "　（上限留空或填 0 代表不限）")
+        self.slot_hint.configure(
+            text="值域：" + "　".join(hints) + "　（上限留空或填 0 代表不限）"
+        )
 
-    def _rebuild_min_match(self, current: int) -> None:
-        count = self.store.snapshot().criteria.slot_count
-        self.opt_min_match.configure(values=[str(i + 1) for i in range(count)])
-        self.var_min_match.set(str(min(current, count)))
+    def _rebuild_min_match(self, current: int, total: int) -> None:
+        self.opt_min_match.configure(values=[str(i + 1) for i in range(total)])
+        self.var_min_match.set(str(min(current, total)))
 
     def _on_slot_count_change(self, value: str) -> None:
         try:
@@ -615,11 +668,88 @@ class NarakaApp(ctk.CTk):
         except ValueError:
             return
         self._apply_settings()  # 先把目前的輸入值寫回
-        self.store.mutate(lambda cfg: setattr(cfg.criteria, "slot_count", count))
-        self._rebuild_slot_rows()
-        self._rebuild_min_match(count)
+        if self._selected_id:
+            self.store.mutate(
+                lambda cfg: [
+                    setattr(i.criteria, "slot_count", count)
+                    for i in cfg.items
+                    if i.id == self._selected_id
+                ]
+            )
+        self._refresh_condition_panel()
         self._apply_settings()
-        self.log_box.append(f"星格條件已切換為 {count} 格", "info")
+        label = "自動（依實際資料）" if count == 0 else f"{count} 格"
+        self.log_box.append(f"格數來源已改為 {label}", "info")
+
+    # ── 條件面板（綁定目前選取的物品）────────────────────────────
+    def _select_item(self, item_id: str, switch_tab: bool = True) -> None:
+        """把某個物品設為條件頁的編輯目標。"""
+        self._selected_id = item_id
+        for rid, row in self._rows.items():
+            row.set_selected(rid == item_id)
+        self._refresh_condition_panel()
+        if switch_tab:
+            self._show_tab("條件與設定")
+
+    def _refresh_condition_panel(self) -> None:
+        """把選取物品的條件載入編輯欄位；未選取時停用整個區塊。"""
+        item = None
+        if self._selected_id:
+            item = self.store.snapshot().item_by_id(self._selected_id)
+
+        if item is None:
+            self._selected_id = None
+            self.lbl_cond_target.configure(
+                text="尚未選取物品\n請於「物品管理」按 ⚙ 條件 選擇要設定的物品",
+                text_color="#6e7681",
+            )
+            self.cond_body.grid_remove()
+            self._rebuild_slot_rows(None)
+            return
+
+        criteria = item.criteria
+        detected = item.detected_slot_count
+        self.lbl_cond_target.configure(
+            text=f"正在編輯：{item.display}　（{item.slot_count_text}）",
+            text_color="#e6edf3",
+        )
+        self.cond_body.grid()
+
+        self.entry_price.delete(0, "end")
+        self.entry_price.insert(0, f"{criteria.max_price_ntd:g}")
+        self.lbl_price_hint.configure(
+            text="填 0 代表不限價"
+            + ("" if criteria.unlimited_price else f"　目前上限 {criteria.price_summary}")
+        )
+
+        self.var_slot_count.set(str(criteria.slot_count))
+        if criteria.slot_count == 0:
+            self.lbl_detected.configure(
+                text=f"自動偵測：{f'實際 {detected} 格' if detected else '尚未掃描，掃描後會自動判定'}"
+            )
+        else:
+            self.lbl_detected.configure(text="已手動指定格數，掃描時不會被自動偵測覆寫")
+
+        total = criteria.resolve_slot_count(detected)
+        self._rebuild_slot_rows(criteria, detected)
+        self.var_logic.set(criteria.logic)
+        self._rebuild_min_match(criteria.effective_min_match, total)
+
+    def _save_criteria_as_default(self) -> None:
+        """把目前編輯中的條件設為之後新增物品的預設。"""
+        item = (
+            self.store.snapshot().item_by_id(self._selected_id)
+            if self._selected_id
+            else None
+        )
+        if item is None:
+            self.log_box.append("請先選取一個物品再設為預設", "warn")
+            return
+        template = item.criteria.copy()
+        self.store.mutate(lambda cfg: setattr(cfg, "defaults", template))
+        self.log_box.append(
+            f"已把「{item.display}」的條件設為新增物品的預設", "sent"
+        )
 
     # ── 監控清單 ────────────────────────────────────────────────
     def _rebuild_items(self, items: Optional[List[ItemEntry]] = None) -> None:
@@ -633,6 +763,7 @@ class NarakaApp(ctk.CTk):
 
         if not items:
             self.lbl_empty.grid()
+            self._refresh_condition_panel()
             return
 
         for index, item in enumerate(items):
@@ -641,9 +772,11 @@ class NarakaApp(ctk.CTk):
                 on_toggle=self._toggle_item,
                 on_remove=self._remove_item,
                 on_open=lambda it=item: self._open_market(it),
+                on_select=lambda iid: self._select_item(iid),
             )
             row.grid(row=index, column=0, sticky="ew", padx=4, pady=4)
             self._rows[item.id] = row
+            row.set_selected(item.id == self._selected_id)
 
     def _add_item(self) -> None:
         raw = self.entry_hash.get().strip()
@@ -659,7 +792,12 @@ class NarakaApp(ctk.CTk):
             self.log_box.append(f"「{hash_name}」已在監控清單中", "warn")
             return
 
-        entry = ItemEntry(hash_name=hash_name, label=self.entry_label.get().strip())
+        # 新物品採寬鬆預設：先看到實際資料，再自己收緊門檻
+        entry = ItemEntry(
+            hash_name=hash_name,
+            label=self.entry_label.get().strip(),
+            criteria=self.store.snapshot().defaults.copy(),
+        )
 
         def apply(cfg: AppConfig) -> None:
             cfg.items.append(entry)
@@ -668,7 +806,10 @@ class NarakaApp(ctk.CTk):
         self.entry_hash.delete(0, "end")
         self.entry_label.delete(0, "end")
         self._rebuild_items()
-        self.log_box.append(f"已加入監控：{hash_name}", "sent")
+        self._select_item(entry.id, switch_tab=False)
+        self.log_box.append(
+            f"已加入監控：{hash_name}（條件為寬鬆預設，請按 ⚙ 條件 設定）", "sent"
+        )
 
     def _import_defaults(self) -> None:
         existing = {normalize_name(i.hash_name) for i in self.store.snapshot().items}
@@ -676,10 +817,13 @@ class NarakaApp(ctk.CTk):
 
         def apply(cfg: AppConfig) -> None:
             nonlocal added
+            template = cfg.defaults.copy()
             for hash_name, label in DEFAULT_ITEMS:
                 if normalize_name(hash_name) in existing:
                     continue
-                cfg.items.append(ItemEntry(hash_name=hash_name, label=label))
+                cfg.items.append(
+                    ItemEntry(hash_name=hash_name, label=label, criteria=template.copy())
+                )
                 added += 1
 
         self.store.mutate(apply)
@@ -710,7 +854,14 @@ class NarakaApp(ctk.CTk):
             cfg.notified.pop(item_id, None)
 
         self.store.mutate(apply)
+        if self._selected_id == item_id:
+            self._selected_id = None
         self._rebuild_items()
+        remaining = self.store.snapshot().items
+        if remaining and not self._selected_id:
+            self._select_item(remaining[0].id, switch_tab=False)
+        else:
+            self._refresh_condition_panel()
         self.log_box.append(f"已移除：{target.hash_name}", "info")
 
     def _open_market(self, item: ItemEntry) -> None:
@@ -774,6 +925,7 @@ class NarakaApp(ctk.CTk):
         self.bridge.register("cycle_done", self._on_cycle_done)
         self.bridge.register("toast", self._on_toast)
         self.bridge.register("cooldown", self._on_cooldown)
+        self.bridge.register("slots_detected", self._on_slots_detected)
 
     def _on_log(self, payload: dict) -> None:
         self.log_box.append(payload.get("text", ""), payload.get("level", "info"))
@@ -800,9 +952,7 @@ class NarakaApp(ctk.CTk):
         if row is None:
             return
         stamp = time.strftime("%H:%M:%S")
-        if payload.get("skipped"):
-            row.set_meta(f"本輪跳過（最低價高於上限）｜{stamp}")
-        elif payload.get("error"):
+        if payload.get("error"):
             row.set_meta(f"爬取失敗：{payload['error']}", LEVEL_STYLES["error"])
         elif payload.get("empty"):
             row.set_meta("取得 0 筆掛單", LEVEL_STYLES["warn"])
@@ -811,6 +961,27 @@ class NarakaApp(ctk.CTk):
             hits = payload.get("hits", 0)
             text = f"共 {total} 筆掛單｜本次通知 {hits} 筆｜{stamp}"
             row.set_meta(text, LEVEL_STYLES["sent"] if hits else LEVEL_STYLES["info"])
+
+    def _on_slots_detected(self, payload: dict) -> None:
+        """掃描時偵測到實際星格數，寫回設定並更新顯示。"""
+        item_id = payload.get("item_id", "")
+        detected = int(payload.get("detected", 0))
+        if detected not in (3, 4):
+            return
+        item = self.store.snapshot().item_by_id(item_id)
+        if item is None or item.detected_slot_count == detected:
+            return
+
+        self.store.mutate(
+            lambda cfg: [
+                setattr(i, "detected_slot_count", detected)
+                for i in cfg.items
+                if i.id == item_id
+            ]
+        )
+        if item_id == self._selected_id:
+            self._refresh_condition_panel()
+        self._sync_row_conditions()
 
     def _on_cycle_done(self, payload: dict) -> None:
         hits = int(payload.get("hits", 0))

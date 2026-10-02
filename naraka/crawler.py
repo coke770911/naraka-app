@@ -12,7 +12,7 @@ from __future__ import annotations
 import random
 import threading
 import time
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .config_store import ConfigStore
 from .dedupe import NotifyDedupe
@@ -102,12 +102,7 @@ class CrawlerWorker(threading.Thread):
 
         self._client.apply(cfg)
         started = time.time()
-        self._log(
-            "info",
-            f"── 掃描開始（{len(items)} 個物品，價格上限 "
-            f"NT${cfg.criteria.max_price_ntd:,.0f}，{cfg.criteria.logic} 需符合 "
-            f"{cfg.criteria.effective_min_match}/{cfg.criteria.slot_count} 格）──",
-        )
+        self._log("info", f"── 掃描開始（{len(items)} 個物品）──")
         self._bridge.post("scan_start", total=len(items))
 
         hits = 0
@@ -155,10 +150,11 @@ class CrawlerWorker(threading.Thread):
             self._bridge.post("item_done", item_id=item.id, hits=0, total=0, empty=True)
             return 0
 
-        # ② 條件篩選
+        # ② 條件篩選（每個物品用自己的條件）
+        detected = self._detect_slot_count(listings)
         matched: List[Tuple[Listing, object]] = []
         for listing in listings:
-            result = evaluate_listing(listing, cfg.criteria)
+            result = evaluate_listing(listing, item.criteria, detected)
             if result.matched:
                 matched.append((listing, result))
             elif cfg.crawler.verbose:
@@ -166,12 +162,27 @@ class CrawlerWorker(threading.Thread):
                     "info", f"    {listing.summary()}｜{result.reason_text()}"
                 )
 
+        # 實際格數與設定不符時提示；自動模式下把偵測結果回報給 UI
+        self._report_slot_count(item, detected)
+
         cheapest = min(listings, key=lambda x: x.price_ntd)
+        dearest = max(listings, key=lambda x: x.price_ntd)
         note = "（已達分頁上限，結果可能不完整）" if truncated else ""
+        price_hint = (
+            f"價格 {cheapest.price_text}~{dearest.price_text}"
+            if dearest.price_ntd > cheapest.price_ntd
+            else f"價格 {cheapest.price_text}"
+        )
+        slot_hint = f"· {detected} 格" if detected else "· 星格解析失敗"
+        crit = item.criteria
+        crit_desc = (
+            f"{'不限價' if crit.unlimited_price else f'≤ {crit.price_summary}'}"
+            f" · {item.slot_count_text}"
+        )
         self._log(
             "info",
-            f"{label}｜取得 {len(listings)} 筆（最低 {cheapest.price_text} "
-            f"· {cheapest.slots_text}），符合 {len(matched)} 筆{note}",
+            f"{label}｜取得 {len(listings)} 筆（{price_hint}{slot_hint}）"
+            f"，條件 {crit_desc}，符合 {len(matched)} 筆{note}",
         )
 
         if not matched:
@@ -196,6 +207,36 @@ class CrawlerWorker(threading.Thread):
             "item_done", item_id=item.id, hits=notified, total=len(listings)
         )
         return notified
+
+    @staticmethod
+    def _detect_slot_count(listings: List[Listing]) -> int:
+        """本頁實際出現的星格格數（取最常見者）。"""
+        counts: Dict[int, int] = {}
+        for listing in listings:
+            if listing.slots:
+                counts[len(listing.slots)] = counts.get(len(listing.slots), 0) + 1
+        if not counts:
+            return 0
+        return max(counts.items(), key=lambda kv: kv[1])[0]
+
+    def _report_slot_count(self, item: ItemEntry, detected: int) -> None:
+        """把實際格數送到 UI；設定與實際不符時給警告。
+
+        自動模式下不寫回條件（保持「自動」語意），只更新顯示用的
+        ``detected_slot_count``，由 UI 寫回設定。
+        """
+        if not detected:
+            return
+        wanted = item.criteria.slot_count
+        if wanted and wanted != detected:
+            # 手動指定與實際不符：仍以手動值比對（filters 會擋下來），
+            # 因為使用者可能是有意只監測某一種寬度。
+            self._log(
+                "warn",
+                f"{item.display}｜條件設為 {wanted} 格，但實際掛單是 {detected} 格，"
+                f"將不會有任何命中（可在條件頁改為自動偵測）",
+            )
+        self._bridge.post("slots_detected", item_id=item.id, detected=detected)
 
     def _notify(self, cfg: AppConfig, item: ItemEntry, listing: Listing) -> None:
         title = f"🎯 {item.display} 新上架！"

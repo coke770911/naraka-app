@@ -121,13 +121,30 @@ class Listing:
         return " | ".join(p for p in parts if p)
 
 
+#: 最後一格（0/1 二元位）填此值代表「不關心」
+ANY = -1
+
+#: 條件檔案格式版本；2 = 每個物品獨立條件
+CONFIG_VERSION = 2
+
+#: 格數可選值，0 代表自動偵測
+SLOT_COUNT_CHOICES = (0, 3, 4)
+
+
 @dataclass
 class Criteria:
-    """全域監控條件：單一價格上限 + 逐格星格門檻。"""
+    """單一物品的監控條件：價格上限 + 逐格星格門檻。
 
+    每個物品各自持有一份，因為實測各商品的星格數與價格區間差異很大
+    （例如 Shadow Scent 是 3 格 / 約 NT$4,000，Novaburst 是 4 格 / 約 NT$47,000），
+    用同一份條件套所有商品會誤判。
+    """
+
+    #: 價格上限；<= 0 代表不限價
     max_price_ntd: float = 10000.0
-    slot_count: int = 3
-    #: 每格下限；最後一格為「精確等於」的值
+    #: 0 = 自動（依實際資料的格數），3 / 4 = 指定
+    slot_count: int = 0
+    #: 每格下限；最後一格為「精確等於」的值，ANY(-1) 代表不關心該格
     slot_min: List[int] = field(default_factory=lambda: [9500, 950, 1])
     #: 每格上限；0 或負數代表不限；最後一格不使用
     slot_max: List[int] = field(default_factory=lambda: [0, 0, 1])
@@ -136,43 +153,96 @@ class Criteria:
     min_match: int = 3
 
     @classmethod
+    def loose(cls) -> "Criteria":
+        """新增物品時的寬鬆預設：不限價、不限星格，全部掛單都會命中。
+
+        使用者先加物品、掃描看到實際資料後再自己收緊門檻。
+        """
+        return cls(
+            max_price_ntd=0.0,
+            slot_count=0,
+            slot_min=[ANY, ANY, ANY, ANY],
+            slot_max=[0, 0, 0, 0],
+            logic="OR",
+            min_match=1,
+        )
+
+    @classmethod
     def from_dict(cls, d: Optional[Dict[str, Any]]) -> "Criteria":
         d = d or {}
+        try:
+            max_price = float(d.get("max_price_ntd", 10000.0))
+        except (TypeError, ValueError):
+            max_price = 10000.0
+        try:
+            slot_count = int(d.get("slot_count", 0) or 0)
+        except (TypeError, ValueError):
+            slot_count = 0
         return cls(
-            max_price_ntd=float(d.get("max_price_ntd", 10000.0) or 0),
-            slot_count=int(d.get("slot_count", 3) or 3),
+            max_price_ntd=max_price,
+            slot_count=slot_count,
             slot_min=[int(v) for v in (d.get("slot_min") or [9500, 950, 1])],
             slot_max=[int(v) for v in (d.get("slot_max") or [0, 0, 1])],
             logic=str(d.get("logic", "OR")).upper(),
             min_match=int(d.get("min_match", 3) or 1),
         )
 
+    def copy(self) -> "Criteria":
+        return Criteria.from_dict(self.to_dict())
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
-    def normalise(self) -> None:
-        if self.slot_count not in (3, 4):
-            self.slot_count = 3
+    def normalise(self, detected_slot_count: int = 0) -> None:
+        """校正欄位值域。
+
+        ``slot_count == 0``（自動）時，依實際抓到的格數決定要保留幾格條件；
+        若還沒偵測到，就先以 4 格鋪滿，兩種格數的條件都不會被截斷。
+        """
+        if self.slot_count not in SLOT_COUNT_CHOICES:
+            self.slot_count = 0
         if self.logic not in ("AND", "OR"):
             self.logic = "OR"
-        self.slot_min = _fit(self.slot_min, self.slot_count, default=0)
-        self.slot_max = _fit(self.slot_max, self.slot_count, default=0)
-        self.min_match = max(1, min(int(self.min_match), self.slot_count))
+
+        size = self.slot_count or detected_slot_count or 4
+        # 補齊時用 ANY 當預設，而不是 0 —— 最後一格的 0 會被解讀成
+        # 「精確等於 0」，讓尚未設定的條件看起來像有在生效。
+        self.slot_min = _fit(self.slot_min, size, default=ANY)
+        self.slot_max = _fit(self.slot_max, size, default=0)
+
         if self.max_price_ntd <= 0:
             self.max_price_ntd = 0.0
+        self.min_match = max(1, min(int(self.min_match), max(size, 1)))
+
+    def resolve_slot_count(self, detected: int = 0) -> int:
+        """回傳實際要比較的格數：指定值優先，否則用偵測值。"""
+        return self.slot_count or detected or 4
+
+    @property
+    def unlimited_price(self) -> bool:
+        return self.max_price_ntd <= 0
+
+    @property
+    def price_summary(self) -> str:
+        return f"NT${self.max_price_ntd:,.0f}"
 
     @property
     def effective_min_match(self) -> int:
-        return max(1, min(int(self.min_match), self.slot_count))
+        return max(1, int(self.min_match))
 
-    def slot_range_hint(self, index: int) -> str:
-        limits = SLOT_LIMITS.get(self.slot_count)
+    def slot_range_hint(self, index: int, slot_count: int = 0) -> str:
+        count = self.resolve_slot_count(slot_count)
+        limits = SLOT_LIMITS.get(count)
         if not limits or index >= len(limits):
             return ""
         lo, hi = limits[index]
         if index == len(limits) - 1:  # 最後一格是 0/1 二元位，一律精確比對
-            return "精確值 0 或 1"
+            return "精確值 0 或 1" if not self._last_slot_any(index) else "不限"
         return f"值域 {lo}~{hi}"
+
+    def _last_slot_any(self, index: int) -> bool:
+        low = self.slot_min[index] if index < len(self.slot_min) else 0
+        return low == ANY
 
 
 def _fit(values: List[int], size: int, default: int = 0) -> List[int]:
@@ -277,16 +347,42 @@ class ItemEntry:
     hash_name: str = ""
     label: str = ""
     enabled: bool = True
+    #: 這個物品自己的條件
+    criteria: Criteria = field(default_factory=Criteria.loose)
+    #: 掃描時偵測到的實際星格數（0 = 尚未偵測），僅供 UI 顯示
+    detected_slot_count: int = 0
     added_at: str = field(default_factory=now_iso)
 
     @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]]) -> "ItemEntry":
+    def from_dict(
+        cls,
+        d: Optional[Dict[str, Any]],
+        legacy: Optional[Criteria] = None,
+    ) -> "ItemEntry":
+        """由設定檔還原。
+
+        ``legacy`` 為 v1 的全域條件；舊檔沒有逐物品條件時沿用它，
+        但格數強制改為自動（見 :meth:`AppConfig.migrate`）。
+        """
         d = d or {}
+        raw = d.get("criteria")
+        if isinstance(raw, dict):
+            criteria = Criteria.from_dict(raw)
+        elif legacy is not None:
+            criteria = legacy.copy()
+        else:
+            criteria = Criteria.loose()
+        try:
+            detected = int(d.get("detected_slot_count", 0) or 0)
+        except (TypeError, ValueError):
+            detected = 0
         return cls(
             id=str(d.get("id") or uuid.uuid4().hex[:12]),
             hash_name=str(d.get("hash_name", "") or "").strip(),
             label=str(d.get("label", "") or "").strip(),
             enabled=bool(d.get("enabled", True)),
+            criteria=criteria,
+            detected_slot_count=detected if detected in (3, 4) else 0,
             added_at=str(d.get("added_at") or now_iso()),
         )
 
@@ -297,11 +393,52 @@ class ItemEntry:
     def display(self) -> str:
         return self.label or self.hash_name
 
+    @property
+    def actual_slot_count(self) -> int:
+        """實際比對時使用的格數（指定優先，其次偵測值）。"""
+        return self.criteria.resolve_slot_count(self.detected_slot_count)
+
+    @property
+    def slot_count_text(self) -> str:
+        if self.criteria.slot_count:
+            return f"{self.criteria.slot_count} 格"
+        if self.detected_slot_count:
+            return f"自動·實際 {self.detected_slot_count} 格"
+        return "自動·未偵測"
+
+    def conditions_summary(self) -> str:
+        """物品列上顯示的一行條件摘要。"""
+        crit = self.criteria
+        parts: List[str] = []
+        parts.append("不限價" if crit.unlimited_price else f"≤ {crit.price_summary}")
+        parts.append(self.slot_count_text)
+
+        size = self.actual_slot_count
+        mins = crit.slot_min[:size]
+        thresholds: List[str] = []
+        for index in range(size):
+            low = mins[index] if index < len(mins) else 0
+            if low == ANY:
+                continue
+            if index == size - 1:
+                thresholds.append(f"末格=={low}")
+            elif low > 0:
+                thresholds.append(f"第{index + 1}格≥{low}")
+        if thresholds:
+            parts.append(" ".join(thresholds))
+        else:
+            parts.append("星格不限")
+
+        required = size if crit.logic == "AND" else crit.effective_min_match
+        parts.append(f"{crit.logic} {required}/{size}")
+        return " · ".join(parts)
+
 
 @dataclass
 class AppConfig:
-    version: int = 1
-    criteria: Criteria = field(default_factory=Criteria)
+    version: int = CONFIG_VERSION
+    #: 新增物品時採用的寬鬆預設條件
+    defaults: Criteria = field(default_factory=Criteria.loose)
     crawler: CrawlerConfig = field(default_factory=CrawlerConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     desktop_notify: bool = True
@@ -312,14 +449,25 @@ class AppConfig:
     @classmethod
     def from_dict(cls, d: Optional[Dict[str, Any]]) -> "AppConfig":
         d = d or {}
+        try:
+            version = int(d.get("version", 1) or 1)
+        except (TypeError, ValueError):
+            version = 1
+
+        legacy = Criteria.from_dict(d.get("criteria")) if version < CONFIG_VERSION else None
+        if legacy is not None:
+            # 舊檔只有一份全域條件，而各商品的星格數與價格區間實際上不同，
+            # 沿用那份格數只會把錯誤延續下去，因此一律改為自動偵測。
+            legacy.slot_count = 0
+
         return cls(
-            version=int(d.get("version", 1) or 1),
-            criteria=Criteria.from_dict(d.get("criteria")),
+            version=CONFIG_VERSION,
+            defaults=Criteria.from_dict(d.get("defaults")),
             crawler=CrawlerConfig.from_dict(d.get("crawler")),
             telegram=TelegramConfig.from_dict(d.get("telegram")),
             desktop_notify=bool(d.get("desktop_notify", True)),
             steam=SteamConfig.from_dict(d.get("steam")),
-            items=[ItemEntry.from_dict(i) for i in (d.get("items") or [])],
+            items=[ItemEntry.from_dict(i, legacy) for i in (d.get("items") or [])],
             notified={
                 str(k): [str(x) for x in (v or [])]
                 for k, v in (d.get("notified") or {}).items()
@@ -329,7 +477,7 @@ class AppConfig:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
-            "criteria": self.criteria.to_dict(),
+            "defaults": self.defaults.to_dict(),
             "crawler": self.crawler.to_dict(),
             "telegram": self.telegram.to_dict(),
             "desktop_notify": self.desktop_notify,
@@ -339,5 +487,16 @@ class AppConfig:
         }
 
     def normalise(self) -> None:
-        self.criteria.normalise()
+        self.defaults.normalise()
         self.crawler.normalise()
+        for item in self.items:
+            item.criteria.normalise(item.detected_slot_count)
+
+    def item_by_id(self, item_id: str) -> Optional[ItemEntry]:
+        for item in self.items:
+            if item.id == item_id:
+                return item
+        return None
+
+    def enabled_items(self) -> List[ItemEntry]:
+        return [i for i in self.items if i.enabled and i.hash_name]

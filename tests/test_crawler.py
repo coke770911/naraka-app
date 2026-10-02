@@ -7,7 +7,7 @@ from make_fixture import build_html
 
 from naraka.config_store import ConfigStore
 from naraka.crawler import CrawlerWorker
-from naraka.models import AppConfig, ItemEntry
+from naraka.models import ANY, AppConfig, ItemEntry
 
 HASH = "Star - Shadow Scent(Non-CN)"
 PAGE = build_html()
@@ -78,13 +78,14 @@ def worker(tmp_path):
     store = ConfigStore(tmp_path / "config.json")
 
     def apply(cfg: AppConfig) -> None:
-        cfg.items.append(ItemEntry(hash_name=HASH, label="謫星·夜影浮香"))
-        cfg.criteria.max_price_ntd = 10000.0
-        cfg.criteria.slot_count = 3
-        cfg.criteria.slot_min = [9500, 950, 1]
-        cfg.criteria.slot_max = [0, 0, 1]
-        cfg.criteria.logic = "AND"
-        cfg.criteria.min_match = 3
+        item = ItemEntry(hash_name=HASH, label="謫星·夜影浮香")
+        item.criteria.max_price_ntd = 10000.0
+        item.criteria.slot_count = 3
+        item.criteria.slot_min = [9500, 950, 1]
+        item.criteria.slot_max = [0, 0, 1]
+        item.criteria.logic = "AND"
+        item.criteria.min_match = 3
+        cfg.items.append(item)
         cfg.crawler.delay_min_sec = 0.0
         cfg.crawler.delay_max_sec = 0.0
         cfg.crawler.interval_min_sec = 5.0
@@ -134,7 +135,7 @@ def test_second_cycle_does_not_resend(worker):
 def test_price_cap_filters_matched_listing(worker):
     """價格上限改由實際抓到的掛單比對（不再靠 search/render 預檢）。"""
     def apply(cfg: AppConfig) -> None:
-        cfg.criteria.max_price_ntd = 5000.0
+        cfg.items[0].criteria.max_price_ntd = 5000.0
 
     worker._store.mutate(apply)
     hits = worker._cycle(worker._store.snapshot())
@@ -147,7 +148,7 @@ def test_price_cap_filters_matched_listing(worker):
 
 def test_slot_condition_filters_out_wrong_values(worker):
     def apply(cfg: AppConfig) -> None:
-        cfg.criteria.slot_min = [9999, 999, 1]
+        cfg.items[0].criteria.slot_min = [9999, 999, 1]
 
     worker._store.mutate(apply)
     hits = worker._cycle(worker._store.snapshot())
@@ -156,6 +157,65 @@ def test_slot_condition_filters_out_wrong_values(worker):
     assert worker._notifier.telegram == []
     assert any("取得 4 筆" in text for text in worker._bridge.logs("info"))
     assert any("符合 0 筆" in text for text in worker._bridge.logs("info"))
+
+
+def test_crawler_reports_detected_slot_count(worker):
+    """自動模式下要把實際格數回報給 UI。"""
+    def apply(cfg: AppConfig) -> None:
+        cfg.items[0].criteria.slot_count = 0
+
+    worker._store.mutate(apply)
+    worker._cycle(worker._store.snapshot())
+
+    events = worker._bridge.of("slots_detected")
+    assert events and events[0]["detected"] == 3
+    assert any("3 格" in text for text in worker._bridge.logs("info"))
+
+
+def test_manual_slot_count_conflict_warns(worker):
+    """手動指定 4 格但實際是 3 格 → 警告，但仍以實際格數比對。"""
+    def apply(cfg: AppConfig) -> None:
+        cfg.items[0].criteria.slot_count = 4
+
+    worker._store.mutate(apply)
+    hits = worker._cycle(worker._store.snapshot())
+
+    assert any("實際掛單是 3 格" in text for text in worker._bridge.logs("warn"))
+    assert hits == 0  # 格數不符 → 不命中，避免拿錯條件比出假結果
+
+
+def test_each_item_uses_own_criteria(tmp_path):
+    """兩個物品各用自己的條件：3 格與 4 格商品同時命中。"""
+    store = ConfigStore(tmp_path / "config.json")
+
+    def apply(cfg: AppConfig) -> None:
+        three = ItemEntry(hash_name=HASH, label="夜影浮香")
+        three.criteria.max_price_ntd = 10000.0
+        three.criteria.slot_count = 3
+        three.criteria.slot_min = [9000, 900, ANY]
+        three.criteria.slot_max = [0, 0, 0]
+        three.criteria.logic = "AND"
+
+        four = ItemEntry(hash_name="Star - Novaburst(Non-CN)", label="天流星輝")
+        four.criteria.max_price_ntd = 50000.0
+        four.criteria.slot_count = 4
+        four.criteria.slot_min = [900, 900, ANY, ANY]
+        four.criteria.slot_max = [0, 0, 0, 0]
+        four.criteria.logic = "AND"
+
+        cfg.items.extend([three, four])
+        cfg.crawler.delay_min_sec = 0.0
+        cfg.crawler.delay_max_sec = 0.0
+
+    store.mutate(apply)
+    crawler = CrawlerWorker(store, FakeBridge(), FakeNotifier())
+    crawler._client = FakeSteam()
+    hits = crawler._cycle(store.snapshot())
+
+    # 3 格物品命中 1 筆（9650-950-1）；4 格物品拿到同一份 fixture 也命中 1 筆
+    assert hits == 2
+    labels = " ".join(crawler._bridge.logs("hit"))
+    assert "夜影浮香" in labels and "天流星輝" in labels
 
 
 def test_no_items_logs_warning(tmp_path):

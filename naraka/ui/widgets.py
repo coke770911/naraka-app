@@ -71,7 +71,14 @@ class LogBox(ctk.CTkFrame):
 
 
 class ItemRow(ctk.CTkFrame):
-    """監控清單中的一列。"""
+    """監控清單中的一列。
+
+    每列有自己的條件摘要，並提供「⚙ 條件」按鈕把該物品設為條件頁的編輯目標。
+    """
+
+    NORMAL_BG = "#1c2128"
+    ACTIVE_BG = "#22303f"
+    ACTIVE_BORDER = "#3b82f6"
 
     def __init__(
         self,
@@ -80,10 +87,12 @@ class ItemRow(ctk.CTkFrame):
         on_toggle: Callable[[str, bool], None],
         on_remove: Callable[[str], None],
         on_open: Callable[[], None],
+        on_select: Callable[[str], None],
     ):
-        super().__init__(master, fg_color="#1c2128", corner_radius=8)
+        super().__init__(master, fg_color=self.NORMAL_BG, corner_radius=8, border_width=0)
         self.item_id = item.id
         self._on_open = on_open
+        self._on_select = on_select
         self._url = market_url(item.hash_name)
 
         self.grid_columnconfigure(0, weight=1)
@@ -98,6 +107,16 @@ class ItemRow(ctk.CTkFrame):
         title.grid(row=0, column=0, sticky="w", padx=(12, 6), pady=(10, 0))
         title.bind("<Button-1>", lambda _e: self._on_open())
 
+        self.conditions = ctk.CTkLabel(
+            self,
+            text=item.conditions_summary(),
+            font=("Consolas", 10),
+            text_color="#7d8590",
+            anchor="w",
+            justify="left",
+        )
+        self.conditions.grid(row=1, column=0, sticky="w", padx=(12, 6), pady=(2, 0))
+
         self.meta = ctk.CTkLabel(
             self,
             text="尚未掃描",
@@ -106,7 +125,7 @@ class ItemRow(ctk.CTkFrame):
             anchor="w",
             justify="left",
         )
-        self.meta.grid(row=1, column=0, columnspan=3, sticky="w", padx=(12, 6), pady=(0, 10))
+        self.meta.grid(row=2, column=0, sticky="w", padx=(12, 6), pady=(0, 10))
 
         hash_label = ctk.CTkLabel(
             self,
@@ -115,7 +134,7 @@ class ItemRow(ctk.CTkFrame):
             text_color="#6e7681",
             anchor="w",
         )
-        hash_label.grid(row=2, column=0, sticky="w", padx=(12, 6), pady=(0, 10))
+        hash_label.grid(row=3, column=0, sticky="w", padx=(12, 6), pady=(0, 10))
         hash_label.bind("<Button-1>", lambda _e: self._on_open())
 
         self.switch = ctk.CTkSwitch(
@@ -130,6 +149,18 @@ class ItemRow(ctk.CTkFrame):
         else:
             self.switch.deselect()
 
+        self.btn_conditions = ctk.CTkButton(
+            self,
+            text="⚙ 條件",
+            width=76,
+            height=28,
+            font=("Microsoft JhengHei", 12),
+            fg_color="#2d3b4a",
+            hover_color="#3a4b5e",
+            command=lambda: self._on_select(self.item_id),
+        )
+        self.btn_conditions.grid(row=0, column=2, padx=6, pady=(10, 0))
+
         remove = ctk.CTkButton(
             self,
             text="移除",
@@ -140,10 +171,25 @@ class ItemRow(ctk.CTkFrame):
             hover_color="#8b3838",
             command=lambda: on_remove(self.item_id),
         )
-        remove.grid(row=0, column=2, padx=(0, 12), pady=(10, 0))
+        remove.grid(row=0, column=3, padx=(0, 12), pady=(10, 0))
 
     def set_meta(self, text: str, color: str = LEVEL_STYLES["info"]) -> None:
         self.meta.configure(text=text, text_color=color)
+
+    def set_conditions(self, text: str) -> None:
+        self.conditions.configure(text=text)
+
+    def set_selected(self, selected: bool) -> None:
+        """標示這一列是否為條件頁目前編輯的目標。"""
+        self.configure(
+            fg_color=self.ACTIVE_BG if selected else self.NORMAL_BG,
+            border_width=2 if selected else 0,
+            border_color=self.ACTIVE_BORDER,
+        )
+        self.btn_conditions.configure(
+            text="⚙ 編輯中" if selected else "⚙ 條件",
+            fg_color="#1f6feb" if selected else "#2d3b4a",
+        )
 
     def open_market(self) -> None:
         webbrowser.open(self._url)
