@@ -73,7 +73,7 @@ class LogBox(ctk.CTkFrame):
 class ItemRow(ctk.CTkFrame):
     """監控清單中的一列。
 
-    每列有自己的條件摘要，並提供「⚙ 條件」按鈕把該物品設為條件頁的編輯目標。
+    點擊卡片內容或「⚙ 條件」可選取該物品作為條件頁的編輯目標；點名稱／網址開啟市場頁。
     """
 
     NORMAL_BG = "#1c2128"
@@ -94,6 +94,7 @@ class ItemRow(ctk.CTkFrame):
         self._on_open = on_open
         self._on_select = on_select
         self._url = market_url(item.hash_name)
+        self.bind("<Button-1>", self._select_row)
 
         self.grid_columnconfigure(0, weight=1)
 
@@ -116,6 +117,7 @@ class ItemRow(ctk.CTkFrame):
             justify="left",
         )
         self.conditions.grid(row=1, column=0, sticky="w", padx=(12, 6), pady=(2, 0))
+        self.conditions.bind("<Button-1>", self._select_row)
 
         self.meta = ctk.CTkLabel(
             self,
@@ -126,6 +128,7 @@ class ItemRow(ctk.CTkFrame):
             justify="left",
         )
         self.meta.grid(row=2, column=0, sticky="w", padx=(12, 6), pady=(0, 10))
+        self.meta.bind("<Button-1>", self._select_row)
 
         hash_label = ctk.CTkLabel(
             self,
@@ -175,6 +178,10 @@ class ItemRow(ctk.CTkFrame):
 
     def set_meta(self, text: str, color: str = LEVEL_STYLES["info"]) -> None:
         self.meta.configure(text=text, text_color=color)
+
+    def _select_row(self, _event=None) -> None:
+        """選取物品；互動控件有各自的 command，不綁定此事件。"""
+        self._on_select(self.item_id)
 
     def set_conditions(self, text: str) -> None:
         self.conditions.configure(text=text)
