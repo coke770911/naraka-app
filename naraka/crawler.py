@@ -154,7 +154,7 @@ class CrawlerWorker(threading.Thread):
         detected = self._detect_slot_count(listings)
         matched: List[Tuple[Listing, object]] = []
         for listing in listings:
-            result = evaluate_listing(listing, item.criteria, detected)
+            result = evaluate_listing(listing, item.criteria)
             if result.matched:
                 matched.append((listing, result))
             elif cfg.crawler.verbose:
@@ -220,23 +220,21 @@ class CrawlerWorker(threading.Thread):
         return max(counts.items(), key=lambda kv: kv[1])[0]
 
     def _report_slot_count(self, item: ItemEntry, detected: int) -> None:
-        """把實際格數送到 UI；設定與實際不符時給警告。
+        """把實際格數送到 UI；與設定不符時給警告。
 
-        自動模式下不寫回條件（保持「自動」語意），只更新顯示用的
-        ``detected_slot_count``，由 UI 寫回設定。
+        格數是使用者手動指定的，這裡只負責把「設定 vs 實際」的落差喊出來，
+        不會把偵測結果寫回條件。實際比對一律以 ``criteria.slot_count`` 為準。
         """
         if not detected:
             return
-        wanted = item.criteria.slot_count
-        if wanted and wanted != detected:
-            # 手動指定與實際不符：仍以手動值比對（filters 會擋下來），
-            # 因為使用者可能是有意只監測某一種寬度。
-            self._log(
-                "warn",
-                f"{item.display}｜條件設為 {wanted} 格，但實際掛單是 {detected} 格，"
-                f"將不會有任何命中（可在條件頁改為自動偵測）",
-            )
         self._bridge.post("slots_detected", item_id=item.id, detected=detected)
+        if detected == item.criteria.slot_count:
+            return
+        self._log(
+            "warn",
+            f"{item.display}｜條件設為 {item.criteria.slot_count} 格，但實際掛單是 {detected} 格，"
+            f"將不會有任何命中（可在條件頁改為另一個格數）",
+        )
 
     def _notify(self, cfg: AppConfig, item: ItemEntry, listing: Listing) -> None:
         title = f"🎯 {item.display} 新上架！"

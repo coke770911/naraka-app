@@ -18,7 +18,7 @@ import customtkinter as ctk
 from .. import __version__
 from ..config_store import ConfigStore
 from ..crawler import CrawlerWorker
-from ..models import ANY, AppConfig, Criteria, ItemEntry, extract_hash_name, normalize_name
+from ..models import AppConfig, Criteria, ItemEntry, extract_hash_name, normalize_name
 from ..notifiers import Notifier
 from ..paths import config_path, file_log_path
 from .bridge import UiBridge
@@ -247,14 +247,14 @@ class NarakaApp(ctk.CTk):
         self.lbl_price_hint.grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         # 星格條件
-        self.var_slot_count = ctk.StringVar(value="0")
+        self.var_slot_count = ctk.StringVar(value="4")
         self.opt_slot_count = ctk.CTkOptionMenu(
-            self.cond_body, values=["0", "3", "4"], variable=self.var_slot_count, width=120,
+            self.cond_body, values=["3", "4"], variable=self.var_slot_count, width=120,
             font=(FONT, 13), command=self._on_slot_count_change,
         )
         self.opt_slot_count.grid(row=2, column=1, sticky="w", pady=5)
         ctk.CTkLabel(
-            self.cond_body, text="格數來源（0=自動）", font=(FONT, 13), width=140, anchor="w"
+            self.cond_body, text="星格格數", font=(FONT, 13), width=140, anchor="w"
         ).grid(row=2, column=0, sticky="w", pady=5)
         self.lbl_detected = ctk.CTkLabel(
             self.cond_body, text="", font=(FONT, 11), text_color="#8b949e", anchor="w",
@@ -283,7 +283,7 @@ class NarakaApp(ctk.CTk):
 
         self.var_min_match = ctk.StringVar(value="1")
         self.opt_min_match = ctk.CTkOptionMenu(
-            self.cond_body, values=["1", "2", "3", "4"], variable=self.var_min_match,
+            self.cond_body, values=["1", "2", "3"], variable=self.var_min_match,
             width=120, font=(FONT, 13), command=lambda _v: self._schedule_autosave(),
         )
         self.opt_min_match.grid(row=7, column=1, sticky="w", pady=5)
@@ -293,10 +293,11 @@ class NarakaApp(ctk.CTk):
 
         ctk.CTkLabel(
             self.cond_body,
-            text="AND = 所有格都要符合；OR = 符合格數達到「最少符合格數」即可。\n"
+            text="AND = 中間格全部都要符合；OR = 中間格符合數達到「最少符合格數」即可。\n"
                  "每格可填「下限」與「上限」（上限填 0 或留空代表不限）；\n"
-                 "最後一格為 0/1 二元位，填 0 或 1 是精確比對，填 -1 代表不關心。\n"
-                 "格數來源選「自動」時，會依掃描到的實際格數（3 格或 4 格）比對。",
+                 "最後一格是 0/1 二元位，必須精確比對且一定要中（不受 AND/OR 影響）；\n"
+                 "最後一格與任何一格留空都代表「不關心」，該格不列入判定。\n"
+                 "格數需手動指定；若與實際掛單不符，該物品不會有命中並在日誌警告。",
             font=(FONT, 11), text_color="#8b949e", anchor="w", justify="left",
         ).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(4, 10))
         row += 2
@@ -535,14 +536,12 @@ class NarakaApp(ctk.CTk):
         max_pages = self._read_int(self.entry_max_pages, crawler.max_pages)
 
         fallback = target.criteria if target else Criteria.loose()
-        mins: List[int] = []
-        maxs: List[int] = []
+        mins: List[Optional[int]] = []
+        maxs: List[Optional[int]] = []
         for index, entry in enumerate(self._slot_min_entries):
-            mins.append(self._read_int(entry, fallback.slot_min[index]
-                                      if index < len(fallback.slot_min) else 0))
+            mins.append(self._read_int(entry, fallback.slot_min_at(index)))
         for index, entry in enumerate(self._slot_max_entries):
-            maxs.append(self._read_int(entry, fallback.slot_max[index]
-                                      if index < len(fallback.slot_max) else 0))
+            maxs.append(self._read_int(entry, fallback.slot_max_at(index)))
         try:
             min_match = int(self.var_min_match.get())
             logic = self.var_logic.get()
@@ -572,7 +571,7 @@ class NarakaApp(ctk.CTk):
                         item.criteria.slot_max = maxs
                     item.criteria.logic = logic
                     item.criteria.min_match = min_match
-                    item.criteria.normalise(item.detected_slot_count)
+                    item.criteria.normalise()
             cfg.crawler.interval_min_sec = interval_min
             cfg.crawler.interval_max_sec = interval_max
             cfg.crawler.delay_min_sec = delay_min
@@ -613,18 +612,21 @@ class NarakaApp(ctk.CTk):
             return fallback
 
     @staticmethod
-    def _read_int(entry: ctk.CTkEntry, fallback: int) -> int:
+    def _read_int(entry: ctk.CTkEntry, fallback: Optional[int]) -> Optional[int]:
+        """讀取整數欄位；留空代表「不關心」→ ``None``。
+
+        星格門檻的值域全為非負，所以留空與填 0 意義不同：0 是真實門檻值。
+        """
         text = entry.get().strip()
         if not text:
-            return fallback
+            return None if fallback is None else fallback
         try:
             return int(float(text))
         except ValueError:
             return fallback
 
     # ── 星格條件列 ──────────────────────────────────────────────
-    def _rebuild_slot_rows(self, criteria: Optional[Criteria] = None,
-                           detected: int = 0) -> None:
+    def _rebuild_slot_rows(self, criteria: Optional[Criteria] = None) -> None:
         for child in self.slot_frame.winfo_children():
             child.destroy()
         self._slot_min_entries = []
@@ -634,7 +636,7 @@ class NarakaApp(ctk.CTk):
             self.slot_hint.configure(text="")
             return
 
-        total = criteria.resolve_slot_count(detected)
+        total = criteria.slot_count
         hints = []
         for index in range(total):
             is_last = index == total - 1
@@ -642,7 +644,7 @@ class NarakaApp(ctk.CTk):
             row.grid_columnconfigure(2, weight=1)
             row.grid(row=index, column=0, sticky="ew")
 
-            hint = criteria.slot_range_hint(index, detected)
+            hint = criteria.slot_range_hint(index)
             hints.append(f"第{index + 1}格 {hint}")
             ctk.CTkLabel(
                 row, text=f"第{index + 1}格", font=(FONT, 13), width=64, anchor="w"
@@ -651,9 +653,12 @@ class NarakaApp(ctk.CTk):
                 row, text=hint, font=(FONT, 10), text_color="#6e7681", width=104, anchor="w"
             ).grid(row=0, column=1, sticky="w", padx=(0, 8))
 
-            low = criteria.slot_min[index] if index < len(criteria.slot_min) else 0
-            entry = ctk.CTkEntry(row, width=96, font=(MONO, 13))
-            entry.insert(0, "" if (is_last and low == ANY) else str(low))
+            low = criteria.slot_min_at(index)
+            entry = ctk.CTkEntry(
+                row, width=96, font=(MONO, 13), placeholder_text="留空 = 不限"
+            )
+            if low is not None:
+                entry.insert(0, str(low))
             entry.bind("<KeyRelease>", lambda _e: self._schedule_autosave())
             entry.bind("<FocusOut>", lambda _e: self._schedule_autosave())
             entry.grid(row=0, column=2, sticky="w", padx=(0, 8))
@@ -661,16 +666,19 @@ class NarakaApp(ctk.CTk):
 
             if is_last:
                 ctk.CTkLabel(
-                    row, text="（精確值，-1 = 不限）", font=(FONT, 10),
+                    row, text="（必中，0 或 1；留空 = 不限）", font=(FONT, 10),
                     text_color="#6e7681", anchor="w",
                 ).grid(row=0, column=3, sticky="w")
             else:
                 ctk.CTkLabel(
                     row, text="上限", font=(FONT, 11), text_color="#8b949e", width=32, anchor="w"
                 ).grid(row=0, column=3, sticky="w")
-                high = criteria.slot_max[index] if index < len(criteria.slot_max) else 0
-                max_entry = ctk.CTkEntry(row, width=96, font=(MONO, 13))
-                max_entry.insert(0, "" if high <= 0 else str(high))
+                high = criteria.slot_max_at(index)
+                max_entry = ctk.CTkEntry(
+                    row, width=96, font=(MONO, 13), placeholder_text="不限"
+                )
+                if high > 0:
+                    max_entry.insert(0, str(high))
                 max_entry.bind("<KeyRelease>", lambda _e: self._schedule_autosave())
                 max_entry.bind("<FocusOut>", lambda _e: self._schedule_autosave())
                 max_entry.grid(row=0, column=4, sticky="w")
@@ -680,9 +688,11 @@ class NarakaApp(ctk.CTk):
             text="值域：" + "　".join(hints) + "　（上限留空或填 0 代表不限）"
         )
 
-    def _rebuild_min_match(self, current: int, total: int) -> None:
-        self.opt_min_match.configure(values=[str(i + 1) for i in range(total)])
-        self.var_min_match.set(str(min(current, total)))
+    def _rebuild_min_match(self, current: int, slot_count: int) -> None:
+        """最少符合格數只針對中間格；末格是絕對匹配，不列入計數。"""
+        options = list(range(1, max(slot_count - 1, 1) + 1))
+        self.opt_min_match.configure(values=[str(n) for n in options])
+        self.var_min_match.set(str(min(current, max(options))))
 
     def _on_slot_count_change(self, value: str) -> None:
         try:
@@ -700,8 +710,7 @@ class NarakaApp(ctk.CTk):
             )
         self._refresh_condition_panel()
         self._apply_settings()
-        label = "自動（依實際資料）" if count == 0 else f"{count} 格"
-        self.log_box.append(f"格數來源已改為 {label}", "info")
+        self.log_box.append(f"格數已改為 {count} 格", "info")
 
     # ── 條件面板（綁定目前選取的物品）────────────────────────────
     def _select_item(self, item_id: str, switch_tab: bool = True) -> None:
@@ -730,7 +739,6 @@ class NarakaApp(ctk.CTk):
             return
 
         criteria = item.criteria
-        detected = item.detected_slot_count
         self.lbl_cond_target.configure(
             text=f"正在編輯：{item.display}　（{item.slot_count_text}）",
             text_color="#e6edf3",
@@ -745,17 +753,22 @@ class NarakaApp(ctk.CTk):
         )
 
         self.var_slot_count.set(str(criteria.slot_count))
-        if criteria.slot_count == 0:
-            self.lbl_detected.configure(
-                text=f"自動偵測：{f'實際 {detected} 格' if detected else '尚未掃描，掃描後會自動判定'}"
-            )
+        if item.detected_slot_count:
+            if item.slot_count_mismatch:
+                self.lbl_detected.configure(
+                    text=f"⚠ 實際偵測 {item.detected_slot_count} 格，與設定不符，不會有命中",
+                    text_color="#d29922",
+                )
+            else:
+                self.lbl_detected.configure(
+                    text=f"實際偵測 {item.detected_slot_count} 格，與設定相符", text_color="#8b949e"
+                )
         else:
-            self.lbl_detected.configure(text="已手動指定格數，掃描時不會被自動偵測覆寫")
+            self.lbl_detected.configure(text="尚未掃描，掃描後會顯示實際格數")
 
-        total = criteria.resolve_slot_count(detected)
-        self._rebuild_slot_rows(criteria, detected)
+        self._rebuild_slot_rows(criteria)
         self.var_logic.set(criteria.logic)
-        self._rebuild_min_match(criteria.effective_min_match, total)
+        self._rebuild_min_match(criteria.effective_min_match, criteria.slot_count)
 
     def _save_criteria_as_default(self) -> None:
         """把目前編輯中的條件設為之後新增物品的預設。"""
@@ -985,7 +998,11 @@ class NarakaApp(ctk.CTk):
             row.set_meta(text, LEVEL_STYLES["sent"] if hits else LEVEL_STYLES["info"])
 
     def _on_slots_detected(self, payload: dict) -> None:
-        """掃描時偵測到實際星格數，寫回設定並更新顯示。"""
+        """記下掃描到的實際星格數並更新顯示。
+
+        只寫 ``detected_slot_count``（供對照與警示），不會動
+        ``criteria.slot_count`` —— 格數是使用者手動指定的。
+        """
         item_id = payload.get("item_id", "")
         detected = int(payload.get("detected", 0))
         if detected not in (3, 4):

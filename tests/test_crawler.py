@@ -7,7 +7,7 @@ from make_fixture import build_html
 
 from naraka.config_store import ConfigStore
 from naraka.crawler import CrawlerWorker
-from naraka.models import ANY, AppConfig, ItemEntry
+from naraka.models import AppConfig, ItemEntry
 
 HASH = "Star - Shadow Scent(Non-CN)"
 PAGE = build_html()
@@ -160,11 +160,7 @@ def test_slot_condition_filters_out_wrong_values(worker):
 
 
 def test_crawler_reports_detected_slot_count(worker):
-    """自動模式下要把實際格數回報給 UI。"""
-    def apply(cfg: AppConfig) -> None:
-        cfg.items[0].criteria.slot_count = 0
-
-    worker._store.mutate(apply)
+    """格數是手動指定的，但仍要把實際格數回報給 UI 供對照。"""
     worker._cycle(worker._store.snapshot())
 
     events = worker._bridge.of("slots_detected")
@@ -172,8 +168,18 @@ def test_crawler_reports_detected_slot_count(worker):
     assert any("3 格" in text for text in worker._bridge.logs("info"))
 
 
+def test_matching_slot_count_does_not_warn(worker):
+    """實際格數與設定相符時不該有警告。"""
+    worker._cycle(worker._store.snapshot())
+
+    assert worker._bridge.logs("warn") == []
+    # 只回報偵測值，設定本身不動（實際寫入由 UI 的 slots_detected 處理）
+    assert worker._bridge.of("slots_detected")[0]["detected"] == 3
+    assert worker._store.snapshot().items[0].criteria.slot_count == 3
+
+
 def test_manual_slot_count_conflict_warns(worker):
-    """手動指定 4 格但實際是 3 格 → 警告，但仍以實際格數比對。"""
+    """手動指定 4 格但實際是 3 格 → 警告，且不命中。"""
     def apply(cfg: AppConfig) -> None:
         cfg.items[0].criteria.slot_count = 4
 
@@ -182,6 +188,8 @@ def test_manual_slot_count_conflict_warns(worker):
 
     assert any("實際掛單是 3 格" in text for text in worker._bridge.logs("warn"))
     assert hits == 0  # 格數不符 → 不命中，避免拿錯條件比出假結果
+    # 偵測到的 3 格不會偷偷寫回設定
+    assert worker._store.snapshot().items[0].criteria.slot_count == 4
 
 
 def test_each_item_uses_own_criteria(tmp_path):
@@ -192,14 +200,14 @@ def test_each_item_uses_own_criteria(tmp_path):
         three = ItemEntry(hash_name=HASH, label="夜影浮香")
         three.criteria.max_price_ntd = 10000.0
         three.criteria.slot_count = 3
-        three.criteria.slot_min = [9000, 900, ANY]
+        three.criteria.slot_min = [9000, 900, None]
         three.criteria.slot_max = [0, 0, 0]
         three.criteria.logic = "AND"
 
         four = ItemEntry(hash_name="Star - Novaburst(Non-CN)", label="天流星輝")
         four.criteria.max_price_ntd = 50000.0
         four.criteria.slot_count = 4
-        four.criteria.slot_min = [900, 900, ANY, ANY]
+        four.criteria.slot_min = [900, 900, None, None]
         four.criteria.slot_max = [0, 0, 0, 0]
         four.criteria.logic = "AND"
 
