@@ -93,6 +93,10 @@ python main.py
 `%LOCALAPPDATA%\NarakaStarMonitor\config.json`，關閉程式時再保險寫入一次。
 完整日誌另存於同目錄的 `crawler.log`。
 
+`config.json` 含 Telegram Token 與 Steam Cookie 等同憑證的欄位，已列入
+`.gitignore` 不會進版控。欄位結構可參考專案內的 `config.example.json`
+（空白模板，不需要手動複製，程式會自己建立）。
+
 ---
 
 ## 條件規則
@@ -175,11 +179,29 @@ Token 與 Chat ID 會以密碼形式顯示並保存在本機 `config.json`。
 
 ## Steam 驗證（選填）
 
-未登入通常仍可讀取公開市場。若遇到 HTTP 429 或被導向驗證頁，可從瀏覽器
-複製以下 Cookie 填入：
+未登入通常仍可讀取公開市場，Cookie 可以留空。若遇到 HTTP 429 或被導向
+驗證頁，再從瀏覽器取得以下 Cookie 填入：
 
 - `steamLoginSecure`
 - `sessionid`
+
+取得方式（Chrome / Edge 通用）：
+
+1. 開啟 `https://steamcommunity.com/market/`，確認已登入
+2. 按 F12 → **Console**，貼上這行按 Enter：
+   ```javascript
+   copy(document.cookie.match(/steamLoginSecure=[^;]+|sessionid=[^;]+/g).join('\n'))
+   ```
+3. 直接貼進程式的 Cookie 欄位
+
+或走 F12 → **Application** → Storage → Cookies → `https://steamcommunity.com`，
+複製 `steamLoginSecure` 與 `sessionid`。
+
+> `steamLoginSecure` 是 JWT，約 24 小時到期，過期後重貼一次即可。
+> 實測真正決定身分的是 `steamLoginSecure`，`sessionid` 只是搭著。
+>
+> Cookie 等同你的登入憑證，誰拿到就能登入你的帳號。程式只把它存在
+> 本機 `config.json`（已列入 `.gitignore`），不會外傳。
 
 ---
 
@@ -319,6 +341,7 @@ Steam 頁面 HTML
 | 1.2.0 | 2026-10-02 | **全域設定獨立成分頁**。原本混在「條件與設定」內的抓取頻率、Telegram、桌面通知、Steam Cookie、維護按鈕移至新的「全域設定」分頁；原分頁改名「物品條件」，只保留逐物品條件。星格值域修正為非末格一律 `0~9999` |
 | 1.2.1 | 2026-10-02 | 新增專案開發規範：每次修改升版並 commit、每 20 次版本化 commit 升第二段版本、僅在明確指示時推送 GitHub；同時規範按需測試、打包與精簡操作 |
 | 1.2.2 | 2026-10-03 | **最後一格改為絕對匹配**（不再被 OR 稀釋）、`-1` 改為留空、移除格數自動偵測改手動指定 3/4、「最少符合格數」只計中間格 |
+| 1.2.3 | 2026-10-03 | 新增 `config.example.json` 空白模板並在 README 說明設定檔位置與 Cookie 取得方式 |
 
 ### 版本與 Git 規則
 

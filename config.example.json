@@ -1,0 +1,87 @@
+{
+  "_說明": "這是設定檔範例。實際設定檔位於 %LOCALAPPDATA%\\NarakaStarMonitor\\config.json，由程式自動建立，不需要手動複製這份檔案。",
+  "_敏感欄位": "telegram.token 與 steam.cookies 等同帳號憑證，絕對不要提交到版控。",
+
+  "version": 2,
+
+  "_defaults說明": "新增物品時採用的寬鬆預設條件。可在程式裡按「設為新增物品預設」覆寫。",
+  "defaults": {
+    "max_price_ntd": 0.0,
+    "slot_count": 4,
+    "slot_min": [null, null, null, null],
+    "slot_max": [0, 0, 0, 0],
+    "logic": "OR",
+    "min_match": 1
+  },
+
+  "_crawler說明": "interval 為每輪掃描完成後到下一輪的間隔；request_gap_sec 是全域請求間隔，調太小會觸發 Steam 限速。",
+  "crawler": {
+    "interval_min_sec": 120.0,
+    "interval_max_sec": 180.0,
+    "delay_min_sec": 2.0,
+    "delay_max_sec": 5.0,
+    "timeout_sec": 20.0,
+    "max_pages": 10,
+    "max_retries": 5,
+    "cooldown_sec": 600,
+    "request_gap_sec": 1.5,
+    "verbose": false
+  },
+
+  "_telegram說明": "填入 token 與 chat_id 後將 enabled 設為 true。chat_id 可在程式內按「取得 Chat ID」自動填入。",
+  "telegram": {
+    "token": "",
+    "chat_id": "",
+    "enabled": false
+  },
+
+  "desktop_notify": true,
+
+  "_steam說明": "cookie 留空即可讀取公開市集；遇到 429 或被導向驗證頁時才需要填。取得方式見 README「Steam 驗證」一節。",
+  "steam": {
+    "cookies": {
+      "steamLoginSecure": "",
+      "sessionid": ""
+    },
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+  },
+
+  "_items說明": "每個物品一份獨立條件。slot_min 為 null 代表該格不關心；最後一格是 0/1 二元位且必須命中。",
+  "items": [
+    {
+      "id": "000000000000",
+      "hash_name": "Star - Shadow Scent(Non-CN)",
+      "label": "謫星·夜影浮香(非國服)",
+      "enabled": true,
+      "criteria": {
+        "max_price_ntd": 10000.0,
+        "slot_count": 3,
+        "slot_min": [9500, 950, 1],
+        "slot_max": [9999, 999, 0],
+        "logic": "AND",
+        "min_match": 2
+      },
+      "detected_slot_count": 0,
+      "added_at": "2026-10-03T00:00:00"
+    },
+    {
+      "id": "000000000001",
+      "hash_name": "Star - Novaburst(Non-CN)",
+      "label": "謫星·天流星輝(非國服)",
+      "enabled": true,
+      "criteria": {
+        "max_price_ntd": 55000.0,
+        "slot_count": 4,
+        "slot_min": [700, 800, 0, 1],
+        "slot_max": [0, 0, 0, 0],
+        "logic": "OR",
+        "min_match": 2
+      },
+      "detected_slot_count": 0,
+      "added_at": "2026-10-03T00:00:00"
+    }
+  ],
+
+  "_notified說明": "已通知的掛單序號，避免重複通知。由程式自動維護，不需要手動填。",
+  "notified": {}
+}
