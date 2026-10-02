@@ -1,0 +1,4 @@
+# Naraka 星格監控工具 - 執行期依賴
+customtkinter>=5.2.2
+requests>=2.31.0
+plyer>=2.1.0

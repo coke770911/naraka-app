@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 虛擬環境
+.venv/
+venv/
+
+# 打包產物
+build/
+dist/
+
+# 本機資料（設定檔可能含 Telegram Token / Steam Cookie）
+*.log
+config.json
+config.json.broken
+
+# 編輯器 / 作業系統
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
