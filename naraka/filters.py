@@ -2,8 +2,8 @@
 
 星格值域（依實際商品）::
 
-    3 格: slot1 0~9999   slot2 0~999   slot3 0~1
-    4 格: slot1 0~9999   slot2 0~999   slot3 0~999   slot4 0~1
+    3 格: slot1 0~9999   slot2 0~9999   slot3 0~1
+    4 格: slot1 0~9999   slot2 0~9999   slot3 0~9999   slot4 0~1
 
 最後一格是 0/1 的二元位，因此一律採「精確等於」比對；填 :data:`~naraka.models.ANY`
 (-1) 則代表不關心。

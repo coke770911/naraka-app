@@ -1,4 +1,4 @@
-"""主視窗：Sidebar + 三個分頁（監控清單 / 條件與設定 / 即時日誌）。
+"""主視窗：Sidebar + 四個分頁（監控清單 / 物品條件 / 全域設定 / 即時日誌）。
 
 執行緒模型
 ----------
@@ -145,11 +145,13 @@ class NarakaApp(ctk.CTk):
         self.tabview = ctk.CTkTabview(self, fg_color="transparent")
         self.tabview.grid(row=0, column=1, sticky="nsew", padx=0)
         self.tabview.add("監控清單")
-        self.tabview.add("條件與設定")
+        self.tabview.add("物品條件")
+        self.tabview.add("全域設定")
         self.tabview.add("即時日誌")
 
         self._build_items_tab(self.tabview.tab("監控清單"))
-        self._build_settings_tab(self.tabview.tab("條件與設定"))
+        self._build_settings_tab(self.tabview.tab("物品條件"))
+        self._build_global_tab(self.tabview.tab("全域設定"))
         self._build_log_tab(self.tabview.tab("即時日誌"))
 
     def _show_tab(self, name: str) -> None:
@@ -197,8 +199,13 @@ class NarakaApp(ctk.CTk):
         )
         self.lbl_empty.grid(row=0, column=0, padx=8, pady=24, sticky="w")
 
-    # ── 分頁 2：條件與設定 ──────────────────────────────────────
+    # ── 分頁 2：物品條件 ────────────────────────────────────────
     def _build_settings_tab(self, parent) -> None:
+        """編輯「目前選取物品」的條件（價格上限 + 逐格星格門檻）。
+
+        每個物品各有一份條件，切換選取物品時由 :meth:`_refresh_condition_panel`
+        帶入。全域設定（抓取頻率、通知、Steam 驗證）在 :meth:`_build_global_tab`。
+        """
         parent.grid_columnconfigure(0, weight=1)
         parent.grid_rowconfigure(0, weight=1)
         wrapper = ctk.CTkScrollableFrame(parent, fg_color="transparent")
@@ -293,6 +300,21 @@ class NarakaApp(ctk.CTk):
             font=(FONT, 11), text_color="#8b949e", anchor="w", justify="left",
         ).grid(row=8, column=0, columnspan=2, sticky="ew", pady=(4, 10))
         row += 2
+
+    # ── 分頁 3：全域設定 ────────────────────────────────────────
+    def _build_global_tab(self, parent) -> None:
+        """設定一次即套用到所有物品的全域選項。
+
+        抓取頻率、通知管道（Telegram / 桌面通知）與 Steam 驗證都不隨物品變動，
+        因此與 :meth:`_build_settings_tab` 的逐物品條件分開，避免混淆。
+        """
+        parent.grid_columnconfigure(0, weight=1)
+        parent.grid_rowconfigure(0, weight=1)
+        wrapper = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        wrapper.grid(row=0, column=0, sticky="nsew", padx=16, pady=14)
+        wrapper.grid_columnconfigure(0, weight=1)
+        wrapper.grid_columnconfigure(1, weight=1)
+        row = 0
 
         # 抓取頻率
         row = self._section(wrapper, row, "抓取頻率")
@@ -422,7 +444,7 @@ class NarakaApp(ctk.CTk):
         right.bind("<KeyRelease>", lambda _e: self._schedule_autosave())
         return left, right
 
-    # ── 分頁 3：即時日誌 ────────────────────────────────────────
+    # ── 分頁 4：即時日誌 ────────────────────────────────────────
     def _build_log_tab(self, parent) -> None:
         parent.grid_rowconfigure(1, weight=1)
         parent.grid_columnconfigure(0, weight=1)
@@ -689,7 +711,7 @@ class NarakaApp(ctk.CTk):
             row.set_selected(rid == item_id)
         self._refresh_condition_panel()
         if switch_tab:
-            self._show_tab("條件與設定")
+            self._show_tab("物品條件")
 
     def _refresh_condition_panel(self) -> None:
         """把選取物品的條件載入編輯欄位；未選取時停用整個區塊。"""

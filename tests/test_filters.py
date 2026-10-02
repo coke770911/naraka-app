@@ -152,6 +152,9 @@ def test_slot_range_hint(count):
     criteria = Criteria(slot_count=count, slot_min=[ANY] * 4)
     criteria.normalise()
     assert criteria.slot_range_hint(0) == "值域 0~9999"
+    # 非最後一格一律是 0~9999 的完整範圍（3 格物品的第2格、4 格物品的第2/3格）
+    for mid in range(1, count - 1):
+        assert criteria.slot_range_hint(mid) == "值域 0~9999"
     last = count - 1
     assert criteria.slot_range_hint(last) == "不限"
 
