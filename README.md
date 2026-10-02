@@ -188,6 +188,7 @@ Token 與 Chat ID 會以密碼形式顯示並保存在本機 `config.json`。
 | 檔案 | 行數 | 職責 |
 | --- | ---: | --- |
 | `main.py` | 27 | 進入點，包住例外處理 |
+| `build.spec` | 62 | PyInstaller 打包設定（onedir） |
 | `naraka/paths.py` | 30 | 資料目錄解析（`%LOCALAPPDATA%\NarakaStarMonitor`） |
 | `naraka/models.py` | 336 | `Listing` / `Criteria` / 各設定資料類別、星格解析、URL 組裝 |
 | `naraka/config_store.py` | 83 | `config.json` 讀寫（原子寫入 + RLock 執行緒安全） |
@@ -289,6 +290,8 @@ pyinstaller build.spec --noconfirm
 ---
 
 ## 授權
+
+MIT License，詳見 [LICENSE](LICENSE)。
 
 僅供個人學習與使用。所有資料版權歸 Valve Corporation 所有；
 本工具不代理、不轉售遊戲內容。

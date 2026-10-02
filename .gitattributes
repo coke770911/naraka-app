@@ -1,0 +1,18 @@
+# 換行符號與文字檔編碼
+#
+# 讓 repo 內一律存 LF，避免不同機器 checkout 出來的檔案不一致，
+# 也讓 git 不再跳出「LF will be replaced by CRLF」的警告。
+
+* text=auto eol=lf
+
+# Windows 專用檔案必須是 CRLF，否則 cmd / PowerShell 執行會出問題
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二進位檔案不做換行轉換
+*.ico binary
+*.png binary
+*.jpg binary
+*.exe binary
+*.dll binary
