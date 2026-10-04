@@ -17,6 +17,10 @@
 
 英文語系則回傳 ``Number`` / ``Constellation`` / ``Star Stats`` /
 ``Available server``。兩種都必須支援。
+
+星格為 ``0000-000-0``（全零）的掛單是市場上真實存在的資料，必須保留並交由
+條件比對，不能當成解析失敗丟棄 —— 實測 Shadow Scent 頁面共 56 筆，其中 12 筆
+星格全零，丟掉會讓掃描筆數與網頁不一致。
 """
 
 from __future__ import annotations
@@ -346,7 +350,12 @@ def _listing_from_description(text: str, hash_name: str) -> Optional[Listing]:
 
     constellation = constellation.strip()
     slots = parse_constellation(constellation)
-    if not slots or not any(slots):
+    if not slots:
+        # 只有「星格欄位整個缺失／切不開」才丟棄。全零星格（``0000-000-0``）
+        # 是市場上真實存在的掛單 —— 實測 Shadow Scent 56 筆裡有 12 筆是全零，
+        # 連謫星數據都有值，只是星格尚未鑑定。把全零當解析失敗會讓筆數比
+        # 網頁少（44 vs 56），而且使用者把末格設為「不關心」時會變成漏報。
+        # 全零交給條件比對即可：末格絕對匹配會自然把它擋掉。
         return None
 
     return Listing(

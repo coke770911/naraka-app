@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from naraka.filters import evaluate_listing
+from naraka.models import Criteria
 from naraka.ssr_parser import (
     SSRParseError,
     extract_render_context,
@@ -47,7 +49,7 @@ def test_parse_ssr_page_returns_listings():
     result = parse_ssr_page(build_html(), HASH)
     assert result.source == "ssr"
     assert result.total_count == 59  # 頁面回報的是全體掛單數，不是本頁筆數
-    assert len(result.listings) == 4  # 全零星格那筆被略過
+    assert len(result.listings) == 5  # 全零星格也是真實掛單，必須保留
 
     first = result.listings[0]
     assert first.listing_number == "S10000001"
@@ -66,6 +68,7 @@ def test_parse_ssr_page_reads_four_slot_constellation():
     assert listings[1].slots == [9999, 999, 1]
     assert listings[1].price_ntd == 12000.0
     assert listings[2].slots == [1200, 300, 0]
+    assert listings[4].slots == [0, 0, 0]  # 全零星格照樣保留
 
 
 def test_static_fixture_matches_builder():
@@ -202,7 +205,7 @@ def test_listing_from_real_chinese_payload():
                                                     ]
                                                 },
                                             },
-                                            # 全零星格 → 非有效商品，必須略過
+                                            # 星格全零 → 仍是有效掛單，不能丟
                                             {
                                                 "unPrice": 350600,
                                                 "strSubtotal": "$4,032.00",
@@ -230,13 +233,74 @@ def test_listing_from_real_chinese_payload():
     }
     html = "<script>window.SSR.renderContext=JSON.parse(" + json.dumps(json.dumps(payload)) + ");</script>"
     result = parse_ssr_page(html, HASH)
-    assert len(result.listings) == 1  # 全零那筆被丟掉
+    assert len(result.listings) == 2  # 全零那筆也保留
     listing = result.listings[0]
     assert listing.listing_number == "S000190"
     assert listing.slots == [5310, 0, 0]
     assert listing.price_ntd == 4032.0
     assert listing.star_stats == 15414
     assert listing.available_server == "非國服"
+
+
+def test_all_zero_constellation_is_kept_and_filtered():
+    """全零星格是市場上真實存在的掛單，要保留並交給條件比對。
+
+    實測 Shadow Scent 頁面 56 筆中有 12 筆是 ``0000-000-0``；把它們當解析
+    失敗丟掉會讓掃描筆數比網頁少（44 vs 56），而且末格設為「不關心」時
+    會變成漏報。末格絕對匹配仍會把它擋掉。
+    """
+    payload = {
+        "queryData": json.dumps(
+            {
+                "queries": [
+                    {
+                        "state": {
+                            "data": {
+                                "pages": [
+                                    {
+                                        "total_count": 2,
+                                        "listings": [
+                                            {
+                                                "strSubtotal": "$4,022.00",
+                                                "description": {
+                                                    "descriptions": [
+                                                        {
+                                                            "type": "bbcode",
+                                                            "value": (
+                                                                "編號:   S000559 \n星格:   0000-000-0\n"
+                                                                "謫星數據:   5490\n適用服務器：非國服"
+                                                            ),
+                                                        }
+                                                    ]
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                ]
+            }
+        )
+    }
+    html = "<script>window.SSR.renderContext=JSON.parse(" + json.dumps(json.dumps(payload)) + ");</script>"
+    listings = parse_ssr_page(html, HASH).listings
+    assert len(listings) == 1
+    assert listings[0].slots == [0, 0, 0]
+    assert listings[0].star_stats == 5490
+
+    # 末格絕對匹配 → 全零那筆不命中（但有進入比對，不是被解析階段丟棄）
+    criteria = Criteria(
+        max_price_ntd=20000.0,
+        slot_count=3,
+        slot_min=[9667, 950, 1],
+        slot_max=[9999, 999, 0],
+        logic="OR",
+        min_match=1,
+    )
+    criteria.normalise()
+    assert not evaluate_listing(listings[0], criteria).matched
 
 
 def test_price_falls_back_to_un_price():

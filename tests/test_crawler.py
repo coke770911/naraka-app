@@ -155,7 +155,7 @@ def test_slot_condition_filters_out_wrong_values(worker):
 
     assert hits == 0
     assert worker._notifier.telegram == []
-    assert any("取得 4 筆" in text for text in worker._bridge.logs("info"))
+    assert any("取得 5 筆" in text for text in worker._bridge.logs("info"))
     assert any("符合 0 筆" in text for text in worker._bridge.logs("info"))
 
 
