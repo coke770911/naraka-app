@@ -58,16 +58,36 @@ class ConfigStore:
 
     # ── 內部 ────────────────────────────────────────────────────
     def _read(self) -> AppConfig:
-        if self._path.exists():
-            try:
-                raw = json.loads(self._path.read_text(encoding="utf-8"))
-                return AppConfig.from_dict(raw)
-            except Exception:
-                try:  # 保留損壞檔案，避免使用者資料被直接抹除
-                    self._path.replace(self._path.with_suffix(".json.broken"))
-                except OSError:
-                    pass
-        return AppConfig()
+        """讀取設定檔。
+
+        「讀不到」與「內容壞掉」必須分開處理：前者多半是暫時性的占用
+        （被鎖、權限不足、同步／防毒軟體正在掃描），這時若照樣把檔案
+        改名保留，使用者的設定就憑空消失，而且下一次存檔會把預設值蓋
+        上去。原子寫入（``os.replace``）保證不會讀到寫到一半的內容，
+        因此讀取失敗一律往外拋錯，交由呼叫端處理。
+        """
+        if not self._path.exists():
+            return AppConfig()
+
+        try:
+            text = self._path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return AppConfig()  # 檢查後剛好被刪掉，視為尚未有設定檔
+
+        try:
+            return AppConfig.from_dict(json.loads(text))
+        except (ValueError, AttributeError, TypeError):
+            # 內容確實無法使用（JSON 損毀或形狀不對）：改名保留原檔，
+            # 避免直接抹除使用者資料。
+            self._quarantine()
+            return AppConfig()
+
+    def _quarantine(self) -> None:
+        """把無法使用的設定檔改名保留；失敗就算了，不能因此中斷啟動。"""
+        try:
+            self._path.replace(self._path.with_suffix(".json.broken"))
+        except OSError:
+            pass
 
     def _write_locked(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)

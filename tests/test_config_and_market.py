@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
+
+import pytest
 
 from naraka.config_store import ConfigStore
 from naraka.dedupe import NotifyDedupe
@@ -151,6 +154,37 @@ def test_store_keeps_detected_slot_count(tmp_path):
 def test_store_recovers_from_broken_file(tmp_path):
     path = tmp_path / "config.json"
     path.write_text("{not json", encoding="utf-8")
+    store = ConfigStore(path)
+    assert store.snapshot().defaults.unlimited_price
+    assert path.with_suffix(".json.broken").exists()
+
+
+def test_store_keeps_file_when_read_fails(tmp_path, monkeypatch):
+    """讀不到（被鎖／權限不足）不是檔案損壞，絕不能改名或丟棄。
+
+    舊實作用 ``except Exception`` 一律當成損壞，結果設定憑空消失，
+    下一次存檔還會把預設值蓋上去。
+    """
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"version": 2}), encoding="utf-8")
+
+    def boom(self, *args, **kwargs):
+        raise PermissionError(13, "used by another process")
+
+    monkeypatch.setattr(Path, "read_text", boom)
+    with pytest.raises(PermissionError):
+        ConfigStore(path)
+    monkeypatch.undo()
+
+    assert path.exists()  # 原檔未被改名、未被清空
+    assert not path.with_suffix(".json.broken").exists()
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+
+
+def test_store_quarantines_unusable_shape(tmp_path):
+    """JSON 合法但形狀不對 → 仍改名保留，回退預設。"""
+    path = tmp_path / "config.json"
+    path.write_text("[1, 2, 3]", encoding="utf-8")
     store = ConfigStore(path)
     assert store.snapshot().defaults.unlimited_price
     assert path.with_suffix(".json.broken").exists()
