@@ -1,6 +1,6 @@
 # Naraka 星格監控工具
 
-**版本 1.2.7**
+**版本 1.2.8**
 
 監控 Steam 社群市場（appid `1203220`）上「謫星 / Star」系列商品的新上架，
 依**每個物品各自設定**的**價格上限**與**星格（Constellation）條件**篩選，
@@ -362,6 +362,7 @@ Steam 頁面 HTML
 | 1.2.5 | 2026-10-05 | 設定檔讀取失敗不再被誤判成損壞（避免設定憑空消失）；README 補上 Cookie／Token 不可外流的警告 |
 | 1.2.6 | 2026-10-07 | Steam Cookie 欄位 `steamLoginSecure` 與 `sessionid` 改為可見文字，方便核對與編輯 |
 | 1.2.7 | 2026-10-07 | Telegram Bot Token 改為可見文字；SSR 解析失敗時日誌會顯示 JSON 備援失敗原因，方便判斷 Steam 驗證、限流或改版 |
+| 1.2.8 | 2026-10-07 | JSON 備援請求加入瀏覽器 AJAX 標頭；非 JSON 回應安全記錄 HTTP 狀態、Content-Type、大小與驗證／登入／限流頁特徵 |
 
 ### 版本與 Git 規則
 
@@ -436,6 +437,13 @@ python assets/make_icon.py
 ---
 
 ## 版本紀錄
+
+### 1.2.8
+
+- **JSON 備援相容性與診斷改善**：舊版 `/render/` 端點加入 `Referer`、
+  `X-Requested-With: XMLHttpRequest` 與 JSON `Accept` 標頭。若仍非 JSON，日誌會
+  輸出 HTTP 狀態、Content-Type、回應大小、HTML title 及驗證／登入／限流特徵，
+  不會輸出 Cookie、Token 或完整回應內容。
 
 ### 1.2.7
 

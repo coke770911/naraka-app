@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import re
 import threading
 import time
 from typing import Callable, Optional
@@ -12,6 +13,11 @@ import requests
 from .models import AppConfig
 
 BACKOFF_BASE = (30, 60, 120)
+JSON_HEADERS = {
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Referer": "https://steamcommunity.com/market/",
+    "X-Requested-With": "XMLHttpRequest",
+}
 LogFn = Callable[[str, str], None]
 
 
@@ -79,13 +85,14 @@ class SteamClient:
         return self._get(url).text
 
     def get_json(self, url: str) -> dict:
-        resp = self._get(url)
+        """取得舊版市場 JSON，帶上瀏覽器 AJAX 標頭以降低被回傳一般 HTML 的機率。"""
+        resp = self._get(url, headers=JSON_HEADERS)
         try:
             return resp.json()
         except ValueError as exc:
-            raise SteamError(f"回應不是合法 JSON: {exc}") from exc
+            raise SteamError(f"回應不是合法 JSON：{_json_response_hint(resp)}") from exc
 
-    def _get(self, url: str) -> requests.Response:
+    def _get(self, url: str, headers: Optional[dict] = None) -> requests.Response:
         cfg = self._cfg or AppConfig()
         attempt = 0
         while True:
@@ -97,7 +104,9 @@ class SteamClient:
                 )
             self._wait_gap(cfg)
             try:
-                resp = self._session.get(url, timeout=cfg.crawler.timeout_sec)
+                resp = self._session.get(
+                    url, timeout=cfg.crawler.timeout_sec, headers=headers
+                )
             except requests.RequestException as exc:
                 if attempt >= cfg.crawler.max_retries:
                     raise SteamError(f"連線失敗: {exc}") from exc
@@ -131,6 +140,7 @@ class SteamClient:
 
             return resp
 
+
     # ── 節流 ────────────────────────────────────────────────────
     def _wait_gap(self, cfg: AppConfig) -> None:
         gap = cfg.crawler.request_gap_sec
@@ -145,6 +155,43 @@ class SteamClient:
         with self._lock:
             self._last_request = time.monotonic()
         return self._stop.wait(max(0.0, seconds))
+
+
+def _json_response_hint(resp: requests.Response) -> str:
+    """以不含完整回應內容的資訊描述非 JSON 回應，避免在日誌洩漏 Cookie 或頁面資料。"""
+    content_type = resp.headers.get("Content-Type", "未提供").split(";", 1)[0].strip()
+    size = len(resp.content or b"")
+    text = (resp.text or "")[:4000]
+    lowered = text.lower()
+    details = []
+
+    if not text.strip():
+        details.append("空白回應")
+    elif "html" in content_type.lower() or "<html" in lowered:
+        title = re.search(r"<title[^>]*>\s*(.*?)\s*</title>", text, re.I | re.S)
+        if title:
+            safe_title = re.sub(r"\s+", " ", title.group(1)).strip()[:120]
+            details.append(f"HTML title「{safe_title}」")
+        else:
+            details.append("HTML 頁面")
+    else:
+        details.append("非 JSON 內容")
+
+    markers = (
+        (("captcha", "recaptcha", "verify you are human", "cf-chl"), "驗證／CAPTCHA 頁"),
+        (("sign in", "log in", "login", "登入"), "登入頁"),
+        (("access denied", "forbidden", "denied"), "存取遭拒頁"),
+        (("rate limit", "too many requests", "請求過於頻繁"), "限流頁"),
+    )
+    for needles, label in markers:
+        if any(needle in lowered for needle in needles):
+            details.append(label)
+            break
+
+    return (
+        f"HTTP {resp.status_code}；Content-Type={content_type or '未提供'}；"
+        f"{size} bytes；{'、'.join(details)}"
+    )
 
 
 def _backoff_seconds(attempt: int) -> int:
