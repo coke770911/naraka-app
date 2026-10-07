@@ -19,7 +19,7 @@ from .dedupe import NotifyDedupe
 from .filters import evaluate_listing
 from .models import AppConfig, ItemEntry, Listing, listing_page_url, listing_ssr_url
 from .notifiers import Notifier, format_telegram_message
-from .ssr_parser import PAGE_SIZE, SSRParseError, parse_listings_json, parse_ssr_page
+from .ssr_parser import PAGE_SIZE, PageResult, SSRParseError, parse_listings_json, parse_ssr_page
 from .steam_client import RateLimitedError, SteamClient, SteamError
 
 
@@ -283,9 +283,13 @@ class CrawlerWorker(threading.Thread):
             try:
                 result = parse_ssr_page(html, item.hash_name)
             except SSRParseError as exc:
-                result = self._fallback_json(item, start)
+                result, fallback_error = self._fallback_json(item, start)
                 if result is None:
-                    self._log("warn", f"{item.display}｜頁面解析失敗：{exc}")
+                    self._log(
+                        "warn",
+                        f"{item.display}｜SSR 頁面解析失敗：{exc}；"
+                        f"JSON 備援失敗：{fallback_error}",
+                    )
                     break
 
             if result.total_count:
@@ -316,19 +320,25 @@ class CrawlerWorker(threading.Thread):
 
         return listings, truncated
 
-    def _fallback_json(self, item: ItemEntry, start: int):
+    def _fallback_json(self, item: ItemEntry, start: int) -> Tuple[Optional[PageResult], str]:
+        """嘗試舊版 JSON 端點，並回傳失敗原因以利判斷 Steam 的實際回應。"""
         try:
             payload = self._client.get_json(listing_page_url(item.hash_name, start=start))
         except RateLimitedError:
             raise
-        except SteamError:
-            return None
+        except SteamError as exc:
+            return None, str(exc)
         if not isinstance(payload, dict):
-            return None
+            return None, "回應不是 JSON 物件"
         if not (payload.get("assets") or payload.get("listinginfo")):
-            return None
-        result = parse_listings_json(payload, item.hash_name)
-        return result if result.listings else None
+            return None, "回應缺少 assets/listinginfo（可能被 Steam 驗證、限流或改版）"
+        try:
+            result = parse_listings_json(payload, item.hash_name)
+        except Exception as exc:
+            return None, f"JSON 掛單資料解析失敗：{exc}"
+        if not result.listings:
+            return None, "JSON 回應沒有可解析的掛單"
+        return result, ""
 
     # ── 日誌 ────────────────────────────────────────────────────
     def _log(self, level: str, text: str) -> None:

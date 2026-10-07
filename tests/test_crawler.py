@@ -178,6 +178,22 @@ def test_matching_slot_count_does_not_warn(worker):
     assert worker._store.snapshot().items[0].criteria.slot_count == 3
 
 
+def test_ssr_and_json_fallback_failure_reports_reason(worker):
+    """SSR 結構消失時，日誌要保留 JSON 備援的失敗原因。"""
+    worker._client.get_text = lambda _url: "<html>Steam verification page</html>"
+
+    listings, _truncated = worker._scrape(
+        worker._store.snapshot(), worker._store.snapshot().items[0]
+    )
+
+    assert listings == []
+    warnings = worker._bridge.logs("warn")
+    assert len(warnings) == 1
+    assert "找不到 window.SSR.renderContext" in warnings[0]
+    assert "JSON 備援失敗" in warnings[0]
+    assert "缺少 assets/listinginfo" in warnings[0]
+
+
 def test_manual_slot_count_conflict_warns(worker):
     """手動指定 4 格但實際是 3 格 → 警告，且不命中。"""
     def apply(cfg: AppConfig) -> None:

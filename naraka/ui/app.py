@@ -350,7 +350,7 @@ class NarakaApp(ctk.CTk):
         row += 1
         self.entry_token = self._labelled(
             wrapper, row, "Bot Token",
-            ctk.CTkEntry(wrapper, width=280, font=(MONO, 12), show="*"),
+            ctk.CTkEntry(wrapper, width=280, font=(MONO, 12)),
         )
         self.entry_token.grid(row=row, column=1, sticky="w", pady=5)
         self.entry_token.bind("<KeyRelease>", lambda _e: self._schedule_autosave())
