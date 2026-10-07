@@ -247,6 +247,8 @@ class CrawlerWorker(threading.Thread):
         if cfg.desktop_notify:
             # 桌面通知會建立 Win32 視窗，交回主執行緒執行較安全
             self._bridge.post("toast", title=title, message=message)
+        # 工作列閃爍與桌面通知無關，一律通知；要不要閃由 UI 端開關決定
+        self._bridge.post("attention")
 
         if cfg.telegram.usable:
             ok = self._notifier.send_telegram(

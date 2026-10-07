@@ -521,3 +521,19 @@ def test_telegram_usable_requires_all_fields():
     assert cfg.telegram.usable
     cfg.telegram.enabled = False
     assert not cfg.telegram.usable
+
+
+def test_flash_taskbar_defaults_to_enabled():
+    """舊設定檔沒有這個欄位也要能開（不動 CONFIG_VERSION）。"""
+    assert AppConfig.from_dict({}).flash_taskbar is True
+    assert AppConfig.from_dict({"flash_taskbar": False}).flash_taskbar is False
+
+
+def test_store_roundtrip_flash_taskbar(tmp_path):
+    path = tmp_path / "config.json"
+    store = ConfigStore(path)
+    store.mutate(lambda cfg: setattr(cfg, "flash_taskbar", False))
+
+    assert ConfigStore(path).snapshot().flash_taskbar is False
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["flash_taskbar"] is False

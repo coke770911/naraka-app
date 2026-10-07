@@ -22,6 +22,7 @@ from ..models import AppConfig, Criteria, ItemEntry, extract_hash_name, normaliz
 from ..notifiers import Notifier
 from ..paths import config_path, file_log_path
 from .bridge import UiBridge
+from .taskbar import flash_taskbar
 from .widgets import LEVEL_STYLES, ItemRow, LogBox
 
 FONT = "Microsoft JhengHei"
@@ -380,6 +381,12 @@ class NarakaApp(ctk.CTk):
             command=lambda: self._schedule_autosave(),
         )
         self.switch_desktop.grid(row=row, column=0, columnspan=2, sticky="w", pady=5)
+        row += 1
+        self.switch_flash = ctk.CTkSwitch(
+            wrapper, text="命中時閃爍工作列（視窗切回前景自動停止）", font=(FONT, 13),
+            command=lambda: self._schedule_autosave(),
+        )
+        self.switch_flash.grid(row=row, column=0, columnspan=2, sticky="w", pady=5)
         row += 2
 
         # Steam
@@ -490,6 +497,7 @@ class NarakaApp(ctk.CTk):
         self.entry_chatid.insert(0, cfg.telegram.chat_id)
         self._set_switch(self.switch_tg, cfg.telegram.enabled)
         self._set_switch(self.switch_desktop, cfg.desktop_notify)
+        self._set_switch(self.switch_flash, cfg.flash_taskbar)
 
         self.entry_cookie_login.insert(0, cfg.steam.cookies.get("steamLoginSecure", ""))
         self.entry_cookie_session.insert(0, cfg.steam.cookies.get("sessionid", ""))
@@ -582,6 +590,7 @@ class NarakaApp(ctk.CTk):
             cfg.telegram.chat_id = chat_id
             cfg.telegram.enabled = bool(self.switch_tg.get())
             cfg.desktop_notify = bool(self.switch_desktop.get())
+            cfg.flash_taskbar = bool(self.switch_flash.get())
             cfg.steam.cookies = {
                 k: v for k, v in (("steamLoginSecure", cookie_login),
                                   ("sessionid", cookie_session)) if v
@@ -959,6 +968,7 @@ class NarakaApp(ctk.CTk):
         self.bridge.register("item_done", self._on_item_done)
         self.bridge.register("cycle_done", self._on_cycle_done)
         self.bridge.register("toast", self._on_toast)
+        self.bridge.register("attention", self._on_attention)
         self.bridge.register("cooldown", self._on_cooldown)
         self.bridge.register("slots_detected", self._on_slots_detected)
 
@@ -1033,6 +1043,11 @@ class NarakaApp(ctk.CTk):
     def _on_toast(self, payload: dict) -> None:
         # plyer 會建立 Win32 視窗，固定在主執行緒呼叫
         self.notifier.send_desktop(payload.get("title", ""), payload.get("message", ""))
+
+    def _on_attention(self, payload: dict) -> None:
+        # 開關在 UI 端判斷，改設定不需等下一輪掃描才生效
+        if self.store.snapshot().flash_taskbar:
+            flash_taskbar(self)
 
     def _on_cooldown(self, payload: dict) -> None:
         seconds = int(payload.get("seconds", 0))

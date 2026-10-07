@@ -1,6 +1,6 @@
 # Naraka 星格監控工具
 
-**版本 1.2.9**
+**版本 1.2.10**
 
 監控 Steam 社群市場（appid `1203220`）上「謫星 / Star」系列商品的新上架，
 依**每個物品各自設定**的**價格上限**與**星格（Constellation）條件**篩選，
@@ -8,6 +8,7 @@
 
 - **Telegram 訊息**（Bot API）
 - **Windows 桌面通知**（plyer Toast）
+- **工作列按鈕閃爍**（視窗切回前景自動停止）
 
 桌面程式為 Python + CustomTkinter（強制深色模式），爬蟲跑在獨立執行緒，
 不會卡住介面。
@@ -85,7 +86,7 @@ python main.py
 | 左側 Sidebar | 啟動 / 停止 / 單次掃描、上次掃描命中數、設定檔位置、版本號 |
 | 監控清單 | 新增商品（含選填顯示名稱）、啟用/停用、移除、**每列的條件摘要**、⚙ 選取條件、點名稱開啟市場頁 |
 | 物品條件 | **選取物品的條件**（價格上限、星格格數、逐格門檻、AND/OR） |
-| 全域設定 | 抓取頻率、Telegram、桌面通知、Steam Cookie、維護 —— 設定一次即套用到所有物品 |
+| 全域設定 | 抓取頻率、Telegram、桌面通知與工作列閃爍、Steam Cookie、維護 —— 設定一次即套用到所有物品 |
 | 即時日誌 | 依等級高亮（★命中 / 已通知 / 警告 / 錯誤 / 一般），可清除 |
 | 底部狀態列 | 執行狀態、目前掃描物件、下次掃描倒數 |
 
@@ -275,17 +276,18 @@ Chat ID 不是憑證，為方便辨識直接顯示。
 | `build.spec` | 62 | PyInstaller 打包設定（onedir） |
 | `assets/make_icon.py` | 132 | 程式化產生 `icon.ico` / `icon.png` |
 | `naraka/paths.py` | 30 | 資料目錄解析（`%LOCALAPPDATA%\NarakaStarMonitor`） |
-| `naraka/models.py` | 502 | `Listing` / `Criteria`（含 `loose()`、`ANY(-1)` 不關心、v1→v2 遷移）/ 各設定資料類別、星格解析、URL 組裝 |
+| `naraka/models.py` | 545 | `Listing` / `Criteria`（含 `loose()`、`ANY(-1)` 不關心、v1→v2 遷移）/ 各設定資料類別、星格解析、URL 組裝 |
 | `naraka/config_store.py` | 86 | `config.json` 讀寫（原子寫入 + RLock 執行緒安全） |
 | `naraka/steam_client.py` | 162 | Session / Cookie / 請求間隔 / 429 退避與冷卻 |
 | `naraka/ssr_parser.py` | 401 | Steam 舊／新版 SSR 解析（`window.SSR.renderContext` 與 `#valve-ssr-data`、中英欄位 + 舊版 JSON 備援） |
 | `naraka/filters.py` | 123 | 價格 + 星格條件判定，回傳逐格 reasons；處理自動格數與 `-1` 略過 |
 | `naraka/dedupe.py` | 59 | 以 listing 序號去重，避免每輪重複通知 |
 | `naraka/notifiers.py` | 138 | Telegram Bot API + plyer 桌面通知 |
-| `naraka/crawler.py` | 342 | 背景爬蟲執行緒（單輪掃描流程、格數偵測） |
+| `naraka/crawler.py` | 340 | 背景爬蟲執行緒（單輪掃描流程、格數偵測） |
 | `naraka/ui/bridge.py` | 71 | `queue.Queue` + `after()` 的執行緒 → UI 橋接 |
+| `naraka/ui/taskbar.py` | 95 | `FlashWindowEx` 工作列閃爍（前景不閃、非 Windows 靜默略過） |
 | `naraka/ui/widgets.py` | 195 | `LogBox`（tag 高亮）、`ItemRow`（含條件摘要與選取高亮） |
-| `naraka/ui/app.py` | 1107 | 主視窗與所有設定互動（4 個分頁：`物品條件` 為逐物品條件、`全域設定` 為設定一次的共用選項） |
+| `naraka/ui/app.py` | 1123 | 主視窗與所有設定互動（4 個分頁：`物品條件` 為逐物品條件、`全域設定` 為設定一次的共用選項） |
 
 ### 執行緒模型
 
@@ -364,6 +366,7 @@ Steam 頁面 HTML
 | 1.2.7 | 2026-10-07 | Telegram Bot Token 改為可見文字；SSR 解析失敗時日誌會顯示 JSON 備援失敗原因，方便判斷 Steam 驗證、限流或改版 |
 | 1.2.8 | 2026-10-07 | JSON 備援請求加入瀏覽器 AJAX 標頭；非 JSON 回應安全記錄 HTTP 狀態、Content-Type、大小與驗證／登入／限流頁特徵 |
 | 1.2.9 | 2026-10-07 | 支援 Steam 新版 `#valve-ssr-data` JSON 容器，重新解析正常市場頁的 `renderContext` 與掛單 |
+| 1.2.10 | 2026-10-07 | **命中時閃爍工作列按鈕**（`FlashWindowEx`，視窗切回前景自動停止），可獨立開關，不受桌面通知設定影響 |
 
 ### 版本與 Git 規則
 
@@ -438,6 +441,15 @@ python assets/make_icon.py
 ---
 
 ## 版本紀錄
+
+### 1.2.10
+
+- **命中時閃爍工作列**：命中一筆掛單後，工作列上的程式按鈕（含圖案）會持續閃爍，
+  提示程式在背景有動靜；視窗一回到前景就自動停止，**視窗本來就在前景時完全不閃**。
+- 實作是 `user32!FlashWindowEx`（`FLASHW_TRAY | FLASHW_TIMERNOFG`），非 Windows 平台
+  或 API 不可用時靜默略過，不影響 Telegram 與桌面通知。
+- 新增獨立開關「命中時閃爍工作列」（預設開啟），**與「桌面通知」開關互不影響**：
+  關掉桌面通知仍會閃。舊設定檔沒有此欄位時自動視為開啟，`version` 不變。
 
 ### 1.2.9
 

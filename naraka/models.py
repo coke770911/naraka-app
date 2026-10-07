@@ -518,6 +518,7 @@ class AppConfig:
     crawler: CrawlerConfig = field(default_factory=CrawlerConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     desktop_notify: bool = True
+    flash_taskbar: bool = True
     steam: SteamConfig = field(default_factory=SteamConfig)
     items: List[ItemEntry] = field(default_factory=list)
     notified: Dict[str, List[str]] = field(default_factory=dict)
@@ -542,6 +543,7 @@ class AppConfig:
             crawler=CrawlerConfig.from_dict(d.get("crawler")),
             telegram=TelegramConfig.from_dict(d.get("telegram")),
             desktop_notify=bool(d.get("desktop_notify", True)),
+            flash_taskbar=bool(d.get("flash_taskbar", True)),
             steam=SteamConfig.from_dict(d.get("steam")),
             items=[ItemEntry.from_dict(i, legacy) for i in (d.get("items") or [])],
             notified={
@@ -557,6 +559,7 @@ class AppConfig:
             "crawler": self.crawler.to_dict(),
             "telegram": self.telegram.to_dict(),
             "desktop_notify": self.desktop_notify,
+            "flash_taskbar": self.flash_taskbar,
             "steam": self.steam.to_dict(),
             "items": [i.to_dict() for i in self.items],
             "notified": self.notified,

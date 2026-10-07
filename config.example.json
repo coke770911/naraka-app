@@ -36,6 +36,7 @@
   },
 
   "desktop_notify": true,
+  "flash_taskbar": true,
 
   "_steam說明": "cookie 留空即可讀取公開市集；遇到 429 或被導向驗證頁時才需要填。取得方式見 README「Steam 驗證」一節。",
   "steam": {

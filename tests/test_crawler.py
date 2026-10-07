@@ -249,3 +249,25 @@ def test_no_items_logs_warning(tmp_path):
 
     assert crawler._cycle(store.snapshot()) == 0
     assert any("沒有啟用中的監控物品" in text for text in crawler._bridge.logs("warn"))
+
+
+def test_attention_event_posted_on_hit(worker):
+    """命中時送 attention，讓 UI 閃工作列。"""
+    assert worker._cycle(worker._store.snapshot()) == 1
+    assert len(worker._bridge.of("attention")) == 1
+
+
+def test_attention_not_posted_without_hit(worker):
+    worker._store.mutate(lambda cfg: setattr(cfg.items[0].criteria, "max_price_ntd", 5000.0))
+
+    assert worker._cycle(worker._store.snapshot()) == 0
+    assert worker._bridge.of("attention") == []
+
+
+def test_attention_is_independent_of_desktop_notify(worker):
+    """關掉桌面通知仍要閃工作列（兩者是獨立開關）。"""
+    worker._store.mutate(lambda cfg: setattr(cfg, "desktop_notify", False))
+
+    assert worker._cycle(worker._store.snapshot()) == 1
+    assert worker._bridge.of("toast") == []
+    assert len(worker._bridge.of("attention")) == 1
