@@ -391,13 +391,13 @@ class NarakaApp(ctk.CTk):
         ).grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         row += 1
         self.entry_cookie_login = self._labelled(
-            wrapper, row, "steamLoginSecure", ctk.CTkEntry(wrapper, width=320, font=(MONO, 11), show="*")
+            wrapper, row, "steamLoginSecure", ctk.CTkEntry(wrapper, width=320, font=(MONO, 11))
         )
         self.entry_cookie_login.grid(row=row, column=1, sticky="w", pady=5)
         self.entry_cookie_login.bind("<KeyRelease>", lambda _e: self._schedule_autosave())
         row += 1
         self.entry_cookie_session = self._labelled(
-            wrapper, row, "sessionid", ctk.CTkEntry(wrapper, width=320, font=(MONO, 11), show="*")
+            wrapper, row, "sessionid", ctk.CTkEntry(wrapper, width=320, font=(MONO, 11))
         )
         self.entry_cookie_session.grid(row=row, column=1, sticky="w", pady=5)
         self.entry_cookie_session.bind("<KeyRelease>", lambda _e: self._schedule_autosave())
