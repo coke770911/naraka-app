@@ -103,6 +103,19 @@ def test_single_quoted_literal_supported():
     assert extract_render_context(html)["queryData"] == inner
 
 
+def test_valve_ssr_data_container_supported():
+    """Steam 新版將 renderContext 放進 application/json script，仍可解析掛單。"""
+    legacy_context = extract_render_context(build_html())
+    container = json.dumps({"Config": {}, "renderContext": legacy_context}, ensure_ascii=False)
+    html = f'<script id="valve-ssr-data" type="application/json">{container}</script>'
+
+    result = parse_ssr_page(html, HASH)
+
+    assert len(result.listings) == 5
+    assert result.total_count == 59
+    assert result.listings[0].listing_number == "S10000001"
+
+
 def test_unescape_keeps_double_escape_inside_single_quotes():
     assert unescape_js_string(r'{\"a\":1}', quote="'") == r'{\"a\":1}'
     assert unescape_js_string(r"{\"a\":1}") == '{"a":1}'

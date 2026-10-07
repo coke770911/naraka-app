@@ -1,8 +1,9 @@
 """Steam 市場頁解析。
 
-優先解析新版（SSR / Next.js）市場頁：
+優先解析 Steam SSR 市場頁（兩種版本容器）：
 
     window.SSR.renderContext=JSON.parse("....")
+    <script id="valve-ssr-data" type="application/json">...</script>
 
 若失敗則退回舊版 JSON 端點 ``/market/listings/<app>/<hash>/render/``，
 其 listing 描述位於 ``assets[*].description``。
@@ -28,11 +29,16 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from html import unescape as html_unescape
 from typing import Any, Dict, Iterator, List, Optional
 
 from .models import Listing, parse_constellation
 
 _SSR_RE = re.compile(r"window\.SSR\.renderContext\s*=\s*JSON\.parse\s*\(")
+_VALVE_SSR_DATA_RE = re.compile(
+    r"<script\b[^>]*\bid\s*=\s*[\"']valve-ssr-data[\"'][^>]*>(.*?)</script\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
 _TAG_RE = re.compile(r"\[/?[a-zA-Z][^\[\]]*\]|<br\s*/?>|</?[a-zA-Z][^>]*>")
 _MONEY_RE = re.compile(r"[-+]?[0-9][0-9,]*(?:\.[0-9]+)?")
 
@@ -159,10 +165,26 @@ def _is_hex(text: str) -> bool:
 
 
 def extract_render_context(html: str) -> Dict[str, Any]:
-    """從市場頁 HTML 取出 ``renderContext`` 物件。"""
-    match = _SSR_RE.search(html or "")
-    if not match:
-        raise SSRParseError("找不到 window.SSR.renderContext（Steam 可能改版或要求登入）")
+    """從舊／新 Steam 市場頁 HTML 取出 ``renderContext`` 物件。"""
+    page = html or ""
+    match = _SSR_RE.search(page)
+    if match:
+        return _extract_legacy_render_context(page, match)
+
+    # 2026-10 Steam 改版：同一份 renderContext 改放到 application/json script。
+    # 外層還含 Config、UserConfig 等資料，僅取 renderContext 以沿用既有頁面解析。
+    valve_data = _VALVE_SSR_DATA_RE.search(page)
+    if valve_data:
+        return _extract_valve_render_context(valve_data.group(1))
+
+    raise SSRParseError(
+        "找不到 Steam SSR 資料（window.SSR.renderContext 或 #valve-ssr-data；"
+        "Steam 可能改版或要求登入）"
+    )
+
+
+def _extract_legacy_render_context(html: str, match: re.Match) -> Dict[str, Any]:
+    """解析舊版 ``window.SSR.renderContext=JSON.parse(...)`` 常值。"""
 
     idx = match.end()
     while idx < len(html) and html[idx] in " \t\r\n":
@@ -193,6 +215,18 @@ def extract_render_context(html: str) -> Dict[str, Any]:
         raise SSRParseError(f"renderContext 不是合法 JSON: {exc}") from exc
     if not isinstance(context, dict):
         raise SSRParseError("renderContext 格式異常")
+    return context
+
+
+def _extract_valve_render_context(raw: str) -> Dict[str, Any]:
+    """解析新版 ``<script id=\"valve-ssr-data\">`` JSON 容器。"""
+    try:
+        container = json.loads(html_unescape(raw).strip())
+    except ValueError as exc:
+        raise SSRParseError(f"valve-ssr-data 不是合法 JSON: {exc}") from exc
+    context = container.get("renderContext") if isinstance(container, dict) else None
+    if not isinstance(context, dict):
+        raise SSRParseError("valve-ssr-data 缺少 renderContext")
     return context
 
 

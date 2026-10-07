@@ -1,6 +1,6 @@
 # Naraka 星格監控工具
 
-**版本 1.2.8**
+**版本 1.2.9**
 
 監控 Steam 社群市場（appid `1203220`）上「謫星 / Star」系列商品的新上架，
 依**每個物品各自設定**的**價格上限**與**星格（Constellation）條件**篩選，
@@ -278,7 +278,7 @@ Chat ID 不是憑證，為方便辨識直接顯示。
 | `naraka/models.py` | 502 | `Listing` / `Criteria`（含 `loose()`、`ANY(-1)` 不關心、v1→v2 遷移）/ 各設定資料類別、星格解析、URL 組裝 |
 | `naraka/config_store.py` | 86 | `config.json` 讀寫（原子寫入 + RLock 執行緒安全） |
 | `naraka/steam_client.py` | 162 | Session / Cookie / 請求間隔 / 429 退避與冷卻 |
-| `naraka/ssr_parser.py` | 401 | `window.SSR.renderContext` 解析（中英欄位 + 舊版 JSON 備援） |
+| `naraka/ssr_parser.py` | 401 | Steam 舊／新版 SSR 解析（`window.SSR.renderContext` 與 `#valve-ssr-data`、中英欄位 + 舊版 JSON 備援） |
 | `naraka/filters.py` | 123 | 價格 + 星格條件判定，回傳逐格 reasons；處理自動格數與 `-1` 略過 |
 | `naraka/dedupe.py` | 59 | 以 listing 序號去重，避免每輪重複通知 |
 | `naraka/notifiers.py` | 138 | Telegram Bot API + plyer 桌面通知 |
@@ -363,6 +363,7 @@ Steam 頁面 HTML
 | 1.2.6 | 2026-10-07 | Steam Cookie 欄位 `steamLoginSecure` 與 `sessionid` 改為可見文字，方便核對與編輯 |
 | 1.2.7 | 2026-10-07 | Telegram Bot Token 改為可見文字；SSR 解析失敗時日誌會顯示 JSON 備援失敗原因，方便判斷 Steam 驗證、限流或改版 |
 | 1.2.8 | 2026-10-07 | JSON 備援請求加入瀏覽器 AJAX 標頭；非 JSON 回應安全記錄 HTTP 狀態、Content-Type、大小與驗證／登入／限流頁特徵 |
+| 1.2.9 | 2026-10-07 | 支援 Steam 新版 `#valve-ssr-data` JSON 容器，重新解析正常市場頁的 `renderContext` 與掛單 |
 
 ### 版本與 Git 規則
 
@@ -425,7 +426,7 @@ python assets/make_icon.py
 | 現象 | 處理方式 |
 | --- | --- |
 | 日誌出現「Steam 限速冷卻中」 | 正常保護行為，等冷卻結束；建議再把請求間隔調大 |
-| 日誌出現「找不到 window.SSR.renderContext」 | Steam 可能改版或要求登入；先貼 Cookie，再回報 issue 附上新版頁面結構 |
+| 日誌出現「找不到 Steam SSR 資料」 | Steam 可能再次改版或要求登入；先確認 Cookie，再回報 issue 附上新版頁面結構 |
 | 取得 0 筆掛單 | 商品名稱可能不精確，確認網址的 `market_hash_name` 有對上 |
 | 桌面通知沒出現 | 確認「啟用 Windows 桌面通知」有開；Windows 設定 → 系統 → 通知 → 允許應用程式通知 |
 | 同一掛單一直重複通知 | 按「清除已通知紀錄」可重置；正常情況下已通知序號會記在 `config.json` |
@@ -437,6 +438,13 @@ python assets/make_icon.py
 ---
 
 ## 版本紀錄
+
+### 1.2.9
+
+- **支援 Steam 新版市場頁**：Steam 已將 `renderContext` 從
+  `window.SSR.renderContext=JSON.parse(...)` 改放到
+  `<script id="valve-ssr-data" type="application/json">`。解析器現同時支援兩種
+  容器，後續 `queryData → market_item_search → listings` 流程不變。
 
 ### 1.2.8
 

@@ -4,9 +4,10 @@
 
     GET https://steamcommunity.com/market/listings/1203220/<urlencoded hash>?start=N
 
-回傳的 HTML 內含：
+回傳的 HTML 內含下列任一種容器：
 
     window.SSR.renderContext=JSON.parse("....")
+    <script id="valve-ssr-data" type="application/json">...</script>
 
 其中 ``queryData`` 是一段巢狀的 JSON 字串，結構為::
 

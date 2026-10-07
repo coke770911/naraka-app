@@ -189,7 +189,7 @@ def test_ssr_and_json_fallback_failure_reports_reason(worker):
     assert listings == []
     warnings = worker._bridge.logs("warn")
     assert len(warnings) == 1
-    assert "找不到 window.SSR.renderContext" in warnings[0]
+    assert "找不到 Steam SSR 資料" in warnings[0]
     assert "JSON 備援失敗" in warnings[0]
     assert "缺少 assets/listinginfo" in warnings[0]
 
