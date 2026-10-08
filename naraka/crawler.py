@@ -189,18 +189,30 @@ class CrawlerWorker(threading.Thread):
             self._bridge.post("item_done", item_id=item.id, hits=0, total=len(listings))
             return 0
 
-        # ③ 通知（依 listing 序號去重，避免每輪重複轟炸）
+        # ③ 通知：相同序號且同價略過；同序號改價時重新通知。
         notified = 0
         for listing, result in matched:
-            if self._dedupe.seen(item.id, listing.listing_number):
-                # 仍然符合條件，但不是新上架 → 用 info 等級，不要混淆成新命中
+            state, old_price = self._dedupe.observe(
+                item.id, listing.listing_number, listing.price_ntd
+            )
+            if state == "baseline":
                 self._log(
                     "info",
-                    f"    ↷ {listing.summary()}｜符合條件但已通知過，略過",
+                    f"    ↷ {listing.summary()}｜舊紀錄建立價格基準，略過",
                 )
+                self._save_notified()
                 continue
-            self._log("hit", f"★ 命中 {label}｜{listing.summary()}｜{result.reason_text()}")
-            self._notify(cfg, item, listing)
+            if state == "same":
+                self._log("info", f"    ↷ {listing.summary()}｜符合條件且價格未變，略過")
+                continue
+            price_change = ""
+            if state == "changed":
+                price_change = f"｜價格變動 NT${old_price:,.2f} → {listing.price_text}"
+            self._log(
+                "hit",
+                f"★ 命中 {label}｜{listing.summary()}{price_change}｜{result.reason_text()}",
+            )
+            self._notify(cfg, item, listing, state == "changed", old_price)
             notified += 1
 
         self._bridge.post(
@@ -236,11 +248,18 @@ class CrawlerWorker(threading.Thread):
             f"將不會有任何命中（可在條件頁改為另一個格數）",
         )
 
-    def _notify(self, cfg: AppConfig, item: ItemEntry, listing: Listing) -> None:
-        title = f"🎯 {item.display} 新上架！"
+    def _notify(
+        self, cfg: AppConfig, item: ItemEntry, listing: Listing,
+        price_changed: bool = False, old_price: Optional[float] = None,
+    ) -> None:
+        title = f"💰 {item.display} 價格變動！" if price_changed else f"🎯 {item.display} 新上架！"
+        price_note = (
+            f"價格變動: NT${old_price:,.2f} → {listing.price_text}\n"
+            if price_changed and old_price is not None else ""
+        )
         message = (
             f"星格: {listing.slots_text}\n"
-            f"價格: {listing.price_text}\n"
+            f"{price_note}價格: {listing.price_text}\n"
             f"序號: {listing.listing_number or '?'}\n"
             f"伺服器: {listing.available_server or '?'}\n{listing.url}"
         )
@@ -254,7 +273,7 @@ class CrawlerWorker(threading.Thread):
             ok = self._notifier.send_telegram(
                 cfg.telegram.token,
                 cfg.telegram.chat_id,
-                format_telegram_message(item, listing),
+                format_telegram_message(item, listing, old_price if price_changed else None),
             )
             self._log(
                 "sent" if ok else "error",
@@ -264,7 +283,9 @@ class CrawlerWorker(threading.Thread):
         else:
             self._log("info", "    ↪ Telegram 未啟用或設定不完整，略過")
 
-        self._dedupe.mark(item.id, listing.listing_number)
+        self._save_notified()
+
+    def _save_notified(self) -> None:
         notified = self._dedupe.to_dict()
         self._store.mutate(lambda c: c.notified.update(notified))
 

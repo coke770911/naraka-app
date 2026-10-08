@@ -7,7 +7,7 @@ from make_fixture import build_html
 
 from naraka.config_store import ConfigStore
 from naraka.crawler import CrawlerWorker
-from naraka.models import AppConfig, ItemEntry
+from naraka.models import AppConfig, ItemEntry, Listing
 
 HASH = "Star - Shadow Scent(Non-CN)"
 PAGE = build_html()
@@ -129,7 +129,26 @@ def test_second_cycle_does_not_resend(worker):
     assert hits == 0
     assert worker._notifier.telegram == []
     assert worker._bridge.logs("hit") == []
-    assert any("已通知過" in text for text in worker._bridge.logs("info"))
+    assert any("價格未變" in text for text in worker._bridge.logs("info"))
+
+
+def test_price_change_resends_same_listing(worker):
+    """相同序號改價後要再次通知，且 Telegram 訊息帶有舊／新價格。"""
+    worker._cycle(worker._store.snapshot())
+    worker._bridge.events.clear()
+    worker._notifier.telegram.clear()
+    changed = Listing(
+        HASH, "S10000001", "9650-950-1", [9650, 950, 1], 9000.0,
+    )
+    worker._scrape = lambda _cfg, _item: ([changed], False)
+
+    hits = worker._cycle(worker._store.snapshot())
+
+    assert hits == 1
+    assert len(worker._notifier.telegram) == 1
+    assert "價格變動" in worker._notifier.telegram[0]
+    assert "NT$9,650.00 → NT$9,000" in worker._notifier.telegram[0]
+    assert any("價格變動 NT$9,650.00 → NT$9,000" in text for text in worker._bridge.logs("hit"))
 
 
 def test_price_cap_filters_matched_listing(worker):

@@ -1,6 +1,6 @@
 # Naraka 星格監控工具
 
-**版本 1.2.10**
+**版本 1.2.11**
 
 監控 Steam 社群市場（appid `1203220`）上「謫星 / Star」系列商品的新上架，
 依**每個物品各自設定**的**價格上限**與**星格（Constellation）條件**篩選，
@@ -263,7 +263,7 @@ Chat ID 不是憑證，為方便辨識直接顯示。
 │  naraka/steam_client.py  Session / 節流 / 退避       │
 │  naraka/config_store.py  config.json 讀寫          │
 │  naraka/models.py      資料類別 / URL 組裝           │
-│  naraka/dedupe.py      序號去重                     │
+│  naraka/dedupe.py      序號＋最後通知價格去重          │
 │  naraka/paths.py       資料目錄                     │
 └─────────────────────────────────────────────────┘
 ```
@@ -281,7 +281,7 @@ Chat ID 不是憑證，為方便辨識直接顯示。
 | `naraka/steam_client.py` | 162 | Session / Cookie / 請求間隔 / 429 退避與冷卻 |
 | `naraka/ssr_parser.py` | 401 | Steam 舊／新版 SSR 解析（`window.SSR.renderContext` 與 `#valve-ssr-data`、中英欄位 + 舊版 JSON 備援） |
 | `naraka/filters.py` | 123 | 價格 + 星格條件判定，回傳逐格 reasons；處理自動格數與 `-1` 略過 |
-| `naraka/dedupe.py` | 59 | 以 listing 序號去重，避免每輪重複通知 |
+| `naraka/dedupe.py` | 81 | 以 listing 序號＋最後通知價格去重；改價再次通知、兼容舊序號紀錄 |
 | `naraka/notifiers.py` | 138 | Telegram Bot API + plyer 桌面通知 |
 | `naraka/crawler.py` | 340 | 背景爬蟲執行緒（單輪掃描流程、格數偵測） |
 | `naraka/ui/bridge.py` | 71 | `queue.Queue` + `after()` 的執行緒 → UI 橋接 |
@@ -301,12 +301,12 @@ thread-safe）；主執行緒以 `after(80ms)` 迴圈 drain 佇列後才更新�
 
 ```
 Steam 頁面 HTML
-  → extract_render_context()   取出 JSON.parse 的字串，還原跳脫
+  → extract_render_context()   取出舊 JSON.parse 或新版 #valve-ssr-data 容器
   → parse_ssr_page()           遍歷 queryData → pages[] → listings[]
   → parse_listing_object()     bbcode（中文欄位）→ Listing
   → _detect_slot_count()       本物品實際的星格格數（3 或 4）
   → evaluate_listing()         該物品自己的價格 + 星格條件 → (matched, reasons)
-  → NotifyDedupe.seen()        已通知過就跳過
+  → NotifyDedupe.observe()     同序號同價略過；改價重新通知
   → Notifier                   Telegram + 桌面通知
 ```
 
@@ -366,6 +366,7 @@ Steam 頁面 HTML
 | 1.2.7 | 2026-10-07 | Telegram Bot Token 改為可見文字；SSR 解析失敗時日誌會顯示 JSON 備援失敗原因，方便判斷 Steam 驗證、限流或改版 |
 | 1.2.8 | 2026-10-07 | JSON 備援請求加入瀏覽器 AJAX 標頭；非 JSON 回應安全記錄 HTTP 狀態、Content-Type、大小與驗證／登入／限流頁特徵 |
 | 1.2.9 | 2026-10-07 | 支援 Steam 新版 `#valve-ssr-data` JSON 容器，重新解析正常市場頁的 `renderContext` 與掛單 |
+| 1.2.11 | 2026-10-08 | 同一掛單序號價格變動時重新通知；舊已通知紀錄靜默建立首次價格基準，避免更新後重發所有舊掛單 |
 | 1.2.10 | 2026-10-07 | **命中時閃爍工作列按鈕**（`FlashWindowEx`，視窗切回前景自動停止），可獨立開關，不受桌面通知設定影響 |
 
 ### 版本與 Git 規則
@@ -432,7 +433,7 @@ python assets/make_icon.py
 | 日誌出現「找不到 Steam SSR 資料」 | Steam 可能再次改版或要求登入；先確認 Cookie，再回報 issue 附上新版頁面結構 |
 | 取得 0 筆掛單 | 商品名稱可能不精確，確認網址的 `market_hash_name` 有對上 |
 | 桌面通知沒出現 | 確認「啟用 Windows 桌面通知」有開；Windows 設定 → 系統 → 通知 → 允許應用程式通知 |
-| 同一掛單一直重複通知 | 按「清除已通知紀錄」可重置；正常情況下已通知序號會記在 `config.json` |
+| 同一掛單一直重複通知 | 按「清除已通知紀錄」可重置；正常情況下會記住序號與最後通知價格，只有價格變動才會再次通知 |
 | 中文顯示為方框 | 系統缺少微軟正黑體（Microsoft JhengHei），字體會自動退回預設 |
 | 某物品一直 0 筆命中，日誌出現「實際掛單是 N 格」 | 格數選錯了。到「物品條件」把格數改成實際的格數 |
 | 掃描筆數仍比網頁少 | 只有「星格欄位整個缺失」的掛單會被略過（欄位格式被 Steam 改掉時才會發生），可在 verbose 日誌比對；若筆數差很多請回報 issue 附上頁面結構 |
@@ -441,6 +442,12 @@ python assets/make_icon.py
 ---
 
 ## 版本紀錄
+
+### 1.2.11
+
+- **改價再次通知**：已通知過的掛單會記住最後通知價格；序號相同且價格相同時略過，
+  價格上升或下降時均再次發送 Telegram、桌面通知與工作列提醒。通知與日誌會顯示舊／新價格。
+- **舊紀錄平滑遷移**：舊版僅有序號的已通知紀錄會在首次遇到時靜默記錄價格，不會因升級而重發全部舊掛單。
 
 ### 1.2.10
 

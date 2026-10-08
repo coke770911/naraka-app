@@ -521,7 +521,8 @@ class AppConfig:
     flash_taskbar: bool = True
     steam: SteamConfig = field(default_factory=SteamConfig)
     items: List[ItemEntry] = field(default_factory=list)
-    notified: Dict[str, List[str]] = field(default_factory=dict)
+    #: item id -> listing number -> 最後通知價格；None 代表從舊版序號清單遷移、尚未建立價格基準。
+    notified: Dict[str, Dict[str, Optional[float]]] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: Optional[Dict[str, Any]]) -> "AppConfig":
@@ -546,10 +547,7 @@ class AppConfig:
             flash_taskbar=bool(d.get("flash_taskbar", True)),
             steam=SteamConfig.from_dict(d.get("steam")),
             items=[ItemEntry.from_dict(i, legacy) for i in (d.get("items") or [])],
-            notified={
-                str(k): [str(x) for x in (v or [])]
-                for k, v in (d.get("notified") or {}).items()
-            },
+            notified=_parse_notified(d.get("notified")),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -579,3 +577,20 @@ class AppConfig:
 
     def enabled_items(self) -> List[ItemEntry]:
         return [i for i in self.items if i.enabled and i.hash_name]
+
+
+def _parse_notified(raw: Any) -> Dict[str, Dict[str, Optional[float]]]:
+    """兼容舊版序號清單，轉成「序號 → 最後通知價格」結構。"""
+    result: Dict[str, Dict[str, Optional[float]]] = {}
+    for item_id, entries in (raw or {}).items():
+        if isinstance(entries, dict):
+            bucket: Dict[str, Optional[float]] = {}
+            for number, price in entries.items():
+                try:
+                    bucket[str(number)] = round(float(price), 2) if price is not None else None
+                except (TypeError, ValueError):
+                    bucket[str(number)] = None
+        else:
+            bucket = {str(number): None for number in (entries or [])}
+        result[str(item_id)] = bucket
+    return result

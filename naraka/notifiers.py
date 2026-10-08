@@ -15,15 +15,19 @@ APP_NAME = "Naraka 星格監控"
 REQUEST_TIMEOUT = 15
 
 
-def format_telegram_message(item: ItemEntry, listing: Listing) -> str:
+def format_telegram_message(
+    item: ItemEntry, listing: Listing, old_price: Optional[float] = None
+) -> str:
     label = html.escape(item.display)
     lines = [
-        f"🎮 <b>{label}</b> 新上架！",
+        f"💰 <b>{label}</b> 價格變動！" if old_price is not None else f"🎮 <b>{label}</b> 新上架！",
         "━━━━━━━━━━━━━━━",
         f"星格: <b>{html.escape(listing.slots_text)}</b>",
         f"序號: {html.escape(listing.listing_number or '?')}",
-        f"價格: <b>{listing.price_text}</b>",
     ]
+    if old_price is not None:
+        lines.append(f"價格變動: <b>NT${old_price:,.2f} → {listing.price_text}</b>")
+    lines.append(f"價格: <b>{listing.price_text}</b>")
     if listing.available_server:
         lines.append(f"伺服器: {html.escape(listing.available_server)}")
     if listing.star_stats:

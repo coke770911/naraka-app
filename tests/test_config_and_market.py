@@ -197,7 +197,7 @@ def test_store_migrate_old_notified_shape(tmp_path):
         encoding="utf-8",
     )
     cfg = ConfigStore(path).snapshot()
-    assert cfg.notified == {"abc": ["S1", "S2"]}
+    assert cfg.notified == {"abc": {"S1": None, "S2": None}}
 
 
 def test_snapshot_is_isolated_copy(tmp_path):
@@ -247,13 +247,32 @@ def test_dedupe_roundtrip():
     assert other.seen("item", "S1") and other.seen("item", "S2")
 
 
+def test_dedupe_price_change_notifies_each_change():
+    dedupe = NotifyDedupe()
+
+    assert dedupe.observe("item", "S1", 100.0) == ("new", None)
+    assert dedupe.observe("item", "S1", 100.0) == ("same", 100.0)
+    assert dedupe.observe("item", "S1", 90.0) == ("changed", 100.0)
+    # 價格改回先前金額也必須再通知，不能只把「序號 + 價格」當永久去重鍵。
+    assert dedupe.observe("item", "S1", 100.0) == ("changed", 90.0)
+
+
+def test_dedupe_legacy_number_silently_establishes_price_baseline():
+    dedupe = NotifyDedupe()
+    dedupe.load({"item": ["S1"]})
+
+    assert dedupe.observe("item", "S1", 100.0) == ("baseline", None)
+    assert dedupe.observe("item", "S1", 100.0) == ("same", 100.0)
+    assert dedupe.to_dict() == {"item": {"S1": 100.0}}
+
+
 def test_dedupe_caps_history():
     dedupe = NotifyDedupe(max_per_item=3)
     for i in range(6):
         dedupe.mark("item", f"S{i}")
     saved = dedupe.to_dict()["item"]
     assert len(saved) == 3
-    assert saved == ["S3", "S4", "S5"]  # 保留最新的
+    assert list(saved) == ["S3", "S4", "S5"]  # 保留最新的
     assert not dedupe.seen("item", "S0")
 
 
