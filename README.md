@@ -1,6 +1,6 @@
 # Naraka 星格監控工具
 
-**版本 1.2.11**
+**版本 1.2.12**
 
 監控 Steam 社群市場（appid `1203220`）上「謫星 / Star」系列商品的新上架，
 依**每個物品各自設定**的**價格上限**與**星格（Constellation）條件**篩選，
@@ -90,8 +90,9 @@ python main.py
 | 即時日誌 | 依等級高亮（★命中 / 已通知 / 警告 / 錯誤 / 一般），可清除 |
 | 底部狀態列 | 執行狀態、目前掃描物件、下次掃描倒數 |
 
-所有設定（含商品清單與已通知紀錄）會**自動儲存**到
-`%LOCALAPPDATA%\NarakaStarMonitor\config.json`，關閉程式時再保險寫入一次。
+全域設定（Telegram、Steam Cookie、掃描頻率等）會**自動儲存**到
+`%LOCALAPPDATA%\NarakaStarMonitor\config.json`；物品清單、逐物品條件與最後通知價格
+儲存於同目錄的 `monitor.db`。舊版 `config.json` 的物品與通知資料首次開啟時會自動遷移。
 完整日誌另存於同目錄的 `crawler.log`。
 
 `config.json` 含 Telegram Token 與 Steam Cookie 等同憑證的欄位，已列入
@@ -261,7 +262,8 @@ Chat ID 不是憑證，為方便辨識直接顯示。
 │  資料層                                           │
 │  naraka/ssr_parser.py  Steam 頁面 → Listing         │
 │  naraka/steam_client.py  Session / 節流 / 退避       │
-│  naraka/config_store.py  config.json 讀寫          │
+│  naraka/config_store.py  JSON＋SQLite 協調          │
+│  naraka/market_store.py  物品條件／通知狀態 SQLite    │
 │  naraka/models.py      資料類別 / URL 組裝           │
 │  naraka/dedupe.py      序號＋最後通知價格去重          │
 │  naraka/paths.py       資料目錄                     │
@@ -278,6 +280,7 @@ Chat ID 不是憑證，為方便辨識直接顯示。
 | `naraka/paths.py` | 30 | 資料目錄解析（`%LOCALAPPDATA%\NarakaStarMonitor`） |
 | `naraka/models.py` | 545 | `Listing` / `Criteria`（含 `loose()`、`ANY(-1)` 不關心、v1→v2 遷移）/ 各設定資料類別、星格解析、URL 組裝 |
 | `naraka/config_store.py` | 86 | `config.json` 讀寫（原子寫入 + RLock 執行緒安全） |
+| `naraka/market_store.py` | 111 | SQLite：監控物品、逐物品條件與最後通知價格（交易＋外鍵） |
 | `naraka/steam_client.py` | 162 | Session / Cookie / 請求間隔 / 429 退避與冷卻 |
 | `naraka/ssr_parser.py` | 401 | Steam 舊／新版 SSR 解析（`window.SSR.renderContext` 與 `#valve-ssr-data`、中英欄位 + 舊版 JSON 備援） |
 | `naraka/filters.py` | 123 | 價格 + 星格條件判定，回傳逐格 reasons；處理自動格數與 `-1` 略過 |
@@ -368,6 +371,7 @@ Steam 頁面 HTML
 | 1.2.9 | 2026-10-07 | 支援 Steam 新版 `#valve-ssr-data` JSON 容器，重新解析正常市場頁的 `renderContext` 與掛單 |
 | 1.2.11 | 2026-10-08 | 同一掛單序號價格變動時重新通知；舊已通知紀錄靜默建立首次價格基準，避免更新後重發所有舊掛單 |
 | 1.2.10 | 2026-10-07 | **命中時閃爍工作列按鈕**（`FlashWindowEx`，視窗切回前景自動停止），可獨立開關，不受桌面通知設定影響 |
+| 1.2.12 | 2026-10-13 | 物品搜尋設定與最後通知價格改存 SQLite；全域設定仍留在 JSON，舊資料自動遷移 |
 
 ### 版本與 Git 規則
 
@@ -442,6 +446,13 @@ python assets/make_icon.py
 ---
 
 ## 版本紀錄
+
+### 1.2.12
+
+- **物品資料移至 SQLite**：`monitor.db` 保存監控物品、每個物品的搜尋條件與最後通知價格；
+  `config.json` 僅保存全域設定與新增物品預設，避免通知紀錄讓 JSON 持續膨脹。
+- **自動遷移**：首次開啟會將舊 `config.json` 的 `items` 與 `notified` 匯入 SQLite，成功後
+  JSON 不再保留這兩個副本；刪除物品會連同其通知狀態刪除。
 
 ### 1.2.11
 

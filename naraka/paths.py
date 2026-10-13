@@ -26,5 +26,10 @@ def config_path() -> Path:
     return data_dir() / "config.json"
 
 
+def database_path() -> Path:
+    """回傳 SQLite 資料庫位置（物品搜尋條件與通知比對狀態）。"""
+    return data_dir() / "monitor.db"
+
+
 def file_log_path() -> Path:
     return data_dir() / "crawler.log"

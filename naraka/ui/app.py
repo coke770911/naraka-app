@@ -20,7 +20,7 @@ from ..config_store import ConfigStore
 from ..crawler import CrawlerWorker
 from ..models import AppConfig, Criteria, ItemEntry, extract_hash_name, normalize_name
 from ..notifiers import Notifier
-from ..paths import config_path, file_log_path
+from ..paths import config_path, database_path, file_log_path
 from .bridge import UiBridge
 from .taskbar import flash_taskbar
 from .widgets import LEVEL_STYLES, ItemRow, LogBox
@@ -47,7 +47,7 @@ class NarakaApp(ctk.CTk):
         self.geometry("1120x760")
         self.minsize(980, 660)
 
-        self.store = ConfigStore(config_path())
+        self.store = ConfigStore(config_path(), database_path())
         self.bridge = UiBridge(self)
         # Notifier 可能在背景執行緒送出日誌 → 一律經由 bridge 回到主執行緒
         self.notifier = Notifier(log=lambda lv, msg: self.bridge.post("log", level=lv, text=msg))

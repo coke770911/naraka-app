@@ -8,8 +8,9 @@ import os
 import tempfile
 import threading
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
+from .market_store import MarketStore
 from .models import AppConfig
 
 
@@ -20,11 +21,13 @@ class ConfigStore:
     UI 正在修改中的半成品狀態。
     """
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, database: Optional[Path] = None):
         self._path = Path(path)
         self._lock = threading.RLock()
         self._cfg = self._read()
         self._cfg.normalise()
+        self._market = MarketStore(database or self._path.with_name("monitor.db"))
+        self._migrate_market_data()
 
     # ── 基本存取 ────────────────────────────────────────────────
     @property
@@ -41,6 +44,7 @@ class ConfigStore:
         with self._lock:
             fn(self._cfg)
             self._cfg.normalise()
+            self._market.save(self._cfg.items, self._cfg.notified)
             if save:
                 self._write_locked()
             return copy.deepcopy(self._cfg)
@@ -53,10 +57,23 @@ class ConfigStore:
         with self._lock:
             self._cfg = AppConfig()
             self._cfg.normalise()
+            self._market.clear_all()
             self._write_locked()
             return copy.deepcopy(self._cfg)
 
     # ── 內部 ────────────────────────────────────────────────────
+    def _migrate_market_data(self) -> None:
+        """首次啟動將 JSON 內物品與通知狀態搬入 SQLite；之後 SQLite 為唯一來源。"""
+        legacy_items = self._cfg.items
+        legacy_notified = self._cfg.notified
+        if not self._market.has_data() and (legacy_items or legacy_notified):
+            self._market.save(legacy_items, legacy_notified)
+        self._cfg.items = self._market.load_items()
+        self._cfg.notified = self._market.load_notified()
+        # 移除過時 JSON 副本，避免兩個來源互相覆寫。
+        if legacy_items or legacy_notified:
+            self._write_locked()
+
     def _read(self) -> AppConfig:
         """讀取設定檔。
 
@@ -96,7 +113,10 @@ class ConfigStore:
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(self._cfg.to_dict(), fh, ensure_ascii=False, indent=2)
+                payload = self._cfg.to_dict()
+                payload.pop("items", None)
+                payload.pop("notified", None)
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
             os.replace(tmp_name, self._path)
         except Exception:
             try:

@@ -190,14 +190,37 @@ def test_store_quarantines_unusable_shape(tmp_path):
     assert path.with_suffix(".json.broken").exists()
 
 
-def test_store_migrate_old_notified_shape(tmp_path):
+def test_store_discards_orphan_notified_records_without_items(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(
         json.dumps({"version": 1, "notified": {"abc": ["S1", "S2"]}}, ensure_ascii=False),
         encoding="utf-8",
     )
     cfg = ConfigStore(path).snapshot()
-    assert cfg.notified == {"abc": {"S1": None, "S2": None}}
+    # SQLite 的 notification_state 有 item 外鍵；沒有對應監控物品的孤兒紀錄無用途。
+    assert cfg.notified == {}
+
+
+def test_store_migrates_items_and_notified_to_sqlite(tmp_path):
+    path = tmp_path / "config.json"
+    item = ItemEntry(hash_name=REAL_URL, label="測試物品")
+    item.criteria.max_price_ntd = 9999
+    raw = AppConfig(items=[item], notified={item.id: {"S1": 1234.0}}).to_dict()
+    path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+
+    store = ConfigStore(path)
+    cfg = store.snapshot()
+
+    assert [entry.id for entry in cfg.items] == [item.id]
+    assert cfg.items[0].criteria.max_price_ntd == 9999
+    assert cfg.notified == {item.id: {"S1": 1234.0}}
+    assert (tmp_path / "monitor.db").exists()
+    json_after = json.loads(path.read_text(encoding="utf-8"))
+    assert "items" not in json_after and "notified" not in json_after
+
+    reloaded = ConfigStore(path).snapshot()
+    assert reloaded.items[0].hash_name == item.hash_name
+    assert reloaded.notified == {item.id: {"S1": 1234.0}}
 
 
 def test_snapshot_is_isolated_copy(tmp_path):

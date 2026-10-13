@@ -47,42 +47,5 @@
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
   },
 
-  "_items說明": "每個物品一份獨立條件。slot_min 為 null 代表該格不關心；最後一格是 0/1 二元位且必須命中。",
-  "items": [
-    {
-      "id": "000000000000",
-      "hash_name": "Star - Shadow Scent(Non-CN)",
-      "label": "謫星·夜影浮香(非國服)",
-      "enabled": true,
-      "criteria": {
-        "max_price_ntd": 10000.0,
-        "slot_count": 3,
-        "slot_min": [9500, 950, 1],
-        "slot_max": [9999, 999, 0],
-        "logic": "AND",
-        "min_match": 2
-      },
-      "detected_slot_count": 0,
-      "added_at": "2026-10-03T00:00:00"
-    },
-    {
-      "id": "000000000001",
-      "hash_name": "Star - Novaburst(Non-CN)",
-      "label": "謫星·天流星輝(非國服)",
-      "enabled": true,
-      "criteria": {
-        "max_price_ntd": 55000.0,
-        "slot_count": 4,
-        "slot_min": [700, 800, 0, 1],
-        "slot_max": [0, 0, 0, 0],
-        "logic": "OR",
-        "min_match": 2
-      },
-      "detected_slot_count": 0,
-      "added_at": "2026-10-03T00:00:00"
-    }
-  ],
-
-  "_notified說明": "已通知的掛單序號，避免重複通知。由程式自動維護，不需要手動填。",
-  "notified": {}
+  "_database說明": "物品清單、每個物品的搜尋條件、已通知掛單與最後通知價格，均由同目錄的 monitor.db 自動保存，不需要手動編輯。"
 }
