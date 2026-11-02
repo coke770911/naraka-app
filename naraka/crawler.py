@@ -22,6 +22,10 @@ from .notifiers import Notifier, format_telegram_message
 from .ssr_parser import PAGE_SIZE, PageResult, SSRParseError, parse_listings_json, parse_ssr_page
 from .steam_client import RateLimitedError, SteamClient, SteamError
 
+# Steam 列表依「價格（由低至高）」排序，但含手續費的顯示價有少量逆序（實測約 2.4%），
+# 因此整頁最低價超過上限一段餘裕後才停止翻頁。
+EARLY_STOP_MARGIN = 1.10
+
 
 class CrawlerWorker(threading.Thread):
     """掃描所有啟用中的物品，比對條件後發送通知。"""
@@ -191,6 +195,7 @@ class CrawlerWorker(threading.Thread):
 
         # ③ 通知：相同序號且同價略過；同序號改價時重新通知。
         notified = 0
+        baseline_added = False
         for listing, result in matched:
             state, old_price = self._dedupe.observe(
                 item.id, listing.listing_number, listing.price_ntd
@@ -200,7 +205,7 @@ class CrawlerWorker(threading.Thread):
                     "info",
                     f"    ↷ {listing.summary()}｜舊紀錄建立價格基準，略過",
                 )
-                self._save_notified()
+                baseline_added = True
                 continue
             if state == "same":
                 self._log("info", f"    ↷ {listing.summary()}｜符合條件且價格未變，略過")
@@ -214,6 +219,8 @@ class CrawlerWorker(threading.Thread):
             )
             self._notify(cfg, item, listing, state == "changed", old_price)
             notified += 1
+        if baseline_added and not notified:  # 有通知時 _notify 已存檔
+            self._save_notified()
 
         self._bridge.post(
             "item_done", item_id=item.id, hits=notified, total=len(listings)
@@ -286,8 +293,7 @@ class CrawlerWorker(threading.Thread):
         self._save_notified()
 
     def _save_notified(self) -> None:
-        notified = self._dedupe.to_dict()
-        self._store.mutate(lambda c: c.notified.update(notified))
+        self._store.save_notified(self._dedupe.to_dict())
 
     # ── 分頁爬取 ────────────────────────────────────────────────
     def _scrape(self, cfg: AppConfig, item: ItemEntry) -> Tuple[List[Listing], bool]:
@@ -332,6 +338,12 @@ class CrawlerWorker(threading.Thread):
                 break
             if not result.listings or empty_streak >= 2:
                 break
+            if self._beyond_price_cap(item, result.listings):
+                self._log(
+                    "info",
+                    f"{item.display}｜第 {page + 1} 頁最低價已超過上限，後續頁面略過",
+                )
+                break
             if page + 1 >= cfg.crawler.max_pages:
                 truncated = total > len(listings)
                 break
@@ -342,6 +354,14 @@ class CrawlerWorker(threading.Thread):
                 break
 
         return listings, truncated
+
+    @staticmethod
+    def _beyond_price_cap(item: ItemEntry, listings: List[Listing]) -> bool:
+        """整頁最低價已明顯高於價格上限時，後續頁面不可能命中。"""
+        if item.criteria.unlimited_price:
+            return False
+        prices = [listing.price_ntd for listing in listings if listing.price_ntd > 0]
+        return bool(prices) and min(prices) > item.criteria.max_price_ntd * EARLY_STOP_MARGIN
 
     def _fallback_json(self, item: ItemEntry, start: int) -> Tuple[Optional[PageResult], str]:
         """嘗試舊版 JSON 端點，並回傳失敗原因以利判斷 Steam 的實際回應。"""

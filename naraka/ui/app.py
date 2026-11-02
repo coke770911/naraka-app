@@ -18,6 +18,7 @@ import customtkinter as ctk
 from .. import __version__
 from ..config_store import ConfigStore
 from ..crawler import CrawlerWorker
+from ..filelog import append_log
 from ..models import AppConfig, Criteria, ItemEntry, extract_hash_name, normalize_name
 from ..notifiers import Notifier
 from ..paths import config_path, database_path, file_log_path
@@ -1127,9 +1128,7 @@ class NarakaApp(ctk.CTk):
     @staticmethod
     def _file_log(line: str) -> None:
         try:
-            path = file_log_path()
-            with open(path, "a", encoding="utf-8", errors="replace") as fh:
-                fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n")
+            append_log(file_log_path(), line)
         except OSError:
             pass
 

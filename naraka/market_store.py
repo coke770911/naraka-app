@@ -102,13 +102,46 @@ class MarketStore:
                          json.dumps(item.criteria.to_dict(), ensure_ascii=False),
                          item.detected_slot_count, item.added_at),
                     )
-                conn.execute("DELETE FROM notification_state")
-                conn.executemany(
-                    "INSERT INTO notification_state (item_id, listing_number, last_notified_price) VALUES (?, ?, ?)",
-                    ((item_id, number, price)
-                     for item_id, entries in notified.items() if item_id in item_ids
-                     for number, price in entries.items()),
-                )
+                self._sync_notified(conn, notified, item_ids)
+
+    def save_notified(self, item_ids: Iterable[str], notified: Dict[str, Dict[str, Optional[float]]]) -> None:
+        """只同步通知狀態（不動物品資料），供爬蟲頻繁存檔使用。"""
+        with self._connect() as conn:
+            with conn:
+                self._sync_notified(conn, notified, set(item_ids))
+
+    @staticmethod
+    def _sync_notified(
+        conn: sqlite3.Connection,
+        notified: Dict[str, Dict[str, Optional[float]]],
+        item_ids: set,
+    ) -> None:
+        """只寫入有變動的列，避免每次存檔都整表刪除重建。"""
+        existing = {
+            (row["item_id"], row["listing_number"]): row["last_notified_price"]
+            for row in conn.execute(
+                "SELECT item_id, listing_number, last_notified_price FROM notification_state"
+            )
+        }
+        wanted = {
+            (item_id, number): price
+            for item_id, entries in notified.items() if item_id in item_ids
+            for number, price in entries.items()
+        }
+        conn.executemany(
+            "DELETE FROM notification_state WHERE item_id = ? AND listing_number = ?",
+            existing.keys() - wanted.keys(),
+        )
+        conn.executemany(
+            """
+            INSERT INTO notification_state (item_id, listing_number, last_notified_price)
+            VALUES (?, ?, ?)
+            ON CONFLICT(item_id, listing_number) DO UPDATE SET
+                last_notified_price=excluded.last_notified_price
+            """,
+            ((item_id, number, price) for (item_id, number), price in wanted.items()
+             if (item_id, number) not in existing or existing[(item_id, number)] != price),
+        )
 
     def clear_all(self) -> None:
         with self._connect() as conn:

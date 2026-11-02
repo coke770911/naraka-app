@@ -49,6 +49,12 @@ class ConfigStore:
                 self._write_locked()
             return copy.deepcopy(self._cfg)
 
+    def save_notified(self, notified) -> None:
+        """合併爬蟲的通知狀態並只寫入 SQLite（config.json 不含此資料）。"""
+        with self._lock:
+            self._cfg.notified.update(notified)
+            self._market.save_notified((item.id for item in self._cfg.items), self._cfg.notified)
+
     def save(self) -> None:
         with self._lock:
             self._write_locked()

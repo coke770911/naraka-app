@@ -599,3 +599,32 @@ def test_market_store_closes_connections(tmp_path):
     assert not [w for w in caught if issubclass(w.category, ResourceWarning)]
     # 連線未關閉時 Windows 會鎖住檔案，改名會失敗
     db.rename(tmp_path / "moved.db")
+
+
+def test_market_store_notified_sync_writes_only_changes(tmp_path):
+    from naraka.market_store import MarketStore
+    from naraka.models import ItemEntry
+
+    store = MarketStore(tmp_path / "monitor.db")
+    item = ItemEntry(hash_name="Star - A")
+    store.save([item], {item.id: {"S1": 100.0, "S2": 200.0}})
+
+    with store._connect() as conn:
+        before = conn.total_changes
+        store._sync_notified(conn, {item.id: {"S1": 100.0, "S2": 250.0, "S3": None}}, {item.id})
+        assert conn.total_changes - before == 2  # S2 改價、S3 新增；S1 不動
+
+    store.save_notified([item.id], {item.id: {"S3": None}})
+    assert store.load_notified() == {item.id: {"S3": None}}
+
+
+def test_file_log_rotates_by_size(tmp_path):
+    from naraka.filelog import append_log
+
+    path = tmp_path / "crawler.log"
+    for index in range(6):
+        append_log(path, f"line {index} " + "x" * 50, max_bytes=100, backups=2)
+
+    names = sorted(p.name for p in tmp_path.iterdir())
+    assert names == ["crawler.log", "crawler.log.1", "crawler.log.2"]
+    assert "line 5" in path.read_text(encoding="utf-8")

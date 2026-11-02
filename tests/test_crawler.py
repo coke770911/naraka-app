@@ -290,3 +290,45 @@ def test_attention_is_independent_of_desktop_notify(worker):
     assert worker._cycle(worker._store.snapshot()) == 1
     assert worker._bridge.of("toast") == []
     assert len(worker._bridge.of("attention")) == 1
+
+
+def test_paging_stops_when_page_is_far_above_price_cap(worker):
+    worker._store.mutate(lambda cfg: setattr(cfg.items[0].criteria, "max_price_ntd", 1000.0))
+
+    worker._cycle(worker._store.snapshot())
+
+    assert len(worker._client.text_calls) == 1
+    assert any("後續頁面略過" in text for text in worker._bridge.logs("info"))
+
+
+def test_paging_continues_within_price_margin(worker):
+    # 整頁最低價 NT$1,500 仍在上限 1,400 的 10% 餘裕內，必須繼續翻頁
+    worker._store.mutate(lambda cfg: setattr(cfg.items[0].criteria, "max_price_ntd", 1400.0))
+
+    worker._cycle(worker._store.snapshot())
+
+    assert len(worker._client.text_calls) > 1
+
+
+def test_unlimited_price_never_stops_paging_early(worker):
+    worker._store.mutate(lambda cfg: setattr(cfg.items[0].criteria, "max_price_ntd", 0.0))
+
+    worker._cycle(worker._store.snapshot())
+
+    assert len(worker._client.text_calls) > 1
+
+
+def test_baseline_saves_once_per_item(worker):
+    item_id = worker._store.snapshot().items[0].id
+    worker._store.mutate(lambda cfg: cfg.notified.update({item_id: {"S10000001": None}}))
+    calls = []
+    original = worker._store.save_notified
+    worker._store.save_notified = lambda data: calls.append(1) or original(data)
+
+    cfg = worker._store.snapshot()
+    worker._dedupe.load(cfg.notified)  # run() 每輪開始時會載入
+    worker._cycle(cfg)
+
+    assert worker._notifier.telegram == []
+    assert len(calls) == 1
+    assert worker._store.snapshot().notified[item_id]["S10000001"] == 9650.0
