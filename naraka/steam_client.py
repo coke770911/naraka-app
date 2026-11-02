@@ -149,11 +149,11 @@ class SteamClient:
             wait = gap - elapsed
         if wait > 0:
             self._sleep(wait)
+        with self._lock:
+            self._last_request = time.monotonic()
 
     def _sleep(self, seconds: float) -> bool:
         """可被停止訊號中斷的 sleep；回傳 True 代表被中止。"""
-        with self._lock:
-            self._last_request = time.monotonic()
         return self._stop.wait(max(0.0, seconds))
 
 

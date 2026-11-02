@@ -43,3 +43,39 @@ def test_json_request_uses_ajax_headers_and_logs_safe_html_hint():
     assert "驗證／CAPTCHA 頁" in message
     assert calls[0][1]["headers"]["X-Requested-With"] == "XMLHttpRequest"
     assert calls[0][1]["headers"]["Referer"] == "https://steamcommunity.com/market/"
+
+
+def test_request_gap_applies_between_back_to_back_requests(monkeypatch):
+    client = SteamClient()
+    cfg = AppConfig()
+    cfg.crawler.request_gap_sec = 1.5
+    client.apply(cfg)
+    waits = []
+    monkeypatch.setattr(client._stop, "wait", lambda seconds: waits.append(seconds) or False)
+    client._session.get = lambda url, **kwargs: type("R", (), {"status_code": 200, "ok": True, "text": ""})()
+
+    client.get_text("https://example.invalid/a")
+    client.get_text("https://example.invalid/b")
+
+    assert len(waits) == 1
+    assert 1.0 < waits[0] <= 1.5
+
+
+def test_telegram_connection_error_log_redacts_token(monkeypatch):
+    import requests
+
+    from naraka import notifiers
+
+    logs = []
+
+    def boom(url, **kwargs):
+        raise requests.ConnectionError(f"Max retries exceeded with url: {url}")
+
+    monkeypatch.setattr(notifiers.requests, "post", boom)
+    monkeypatch.setattr(notifiers.requests, "get", boom)
+    notifier = notifiers.Notifier(log=lambda level, text: logs.append(text))
+
+    assert notifier.send_telegram("123:SECRET", "42", "hi") is False
+    assert notifier.fetch_chat_ids("123:SECRET") == []
+    assert len(logs) == 2
+    assert all("SECRET" not in text and "/bot***/" in text for text in logs)

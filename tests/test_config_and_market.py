@@ -579,3 +579,23 @@ def test_store_roundtrip_flash_taskbar(tmp_path):
     assert ConfigStore(path).snapshot().flash_taskbar is False
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["flash_taskbar"] is False
+
+
+def test_market_store_closes_connections(tmp_path):
+    import gc
+    import warnings
+
+    from naraka.market_store import MarketStore
+
+    db = tmp_path / "monitor.db"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ResourceWarning)
+        store = MarketStore(db)
+        store.save([], {})
+        store.load_items()
+        store.load_notified()
+        gc.collect()
+
+    assert not [w for w in caught if issubclass(w.category, ResourceWarning)]
+    # 連線未關閉時 Windows 會鎖住檔案，改名會失敗
+    db.rename(tmp_path / "moved.db")

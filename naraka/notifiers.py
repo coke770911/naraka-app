@@ -57,7 +57,7 @@ class Notifier:
             try:
                 resp = requests.post(url, json=payload, timeout=REQUEST_TIMEOUT)
             except requests.RequestException as exc:
-                self._log("error", f"Telegram 連線失敗：{exc}")
+                self._log("error", f"Telegram 連線失敗：{_redact_token(exc, token)}")
                 return False
             if resp.ok:
                 return True
@@ -83,7 +83,7 @@ class Notifier:
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.RequestException as exc:
-            self._log("error", f"取得 Chat ID 失敗：{exc}")
+            self._log("error", f"取得 Chat ID 失敗：{_redact_token(exc, token)}")
             return []
         if not resp.ok:
             self._log("error", f"取得 Chat ID 失敗：{_telegram_error(resp)}")
@@ -122,6 +122,13 @@ class Notifier:
         except Exception as exc:
             self._log("error", f"桌面通知失敗：{exc}")
             return False
+
+
+def _redact_token(exc: Exception, token: str) -> str:
+    """requests 的錯誤訊息會帶完整 URL（含 bot token），寫入日誌前先遮蔽。"""
+    text = str(exc)
+    token = (token or "").strip()
+    return text.replace(token, "***") if token else text
 
 
 def _telegram_retry_after(resp: requests.Response) -> Optional[int]:
